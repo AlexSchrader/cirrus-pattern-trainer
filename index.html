@@ -95,7 +95,7 @@ body.beg #radio.open.live #sayit.has{display:flex}
 #radio.open #log,#radio.open #cs{display:none}#radio.pin #log,#radio.pin #cs,body.typing #radio #cs{display:block}   /* a pending call shows just the message and the input; typing adds the call-sign help; tap the strip for the whole log */
 #log{max-height:74px;overflow-y:auto;padding:5px 8px 1px;font-size:12px;line-height:1.32;-webkit-user-select:text;user-select:text;touch-action:pan-y}
 #log p{margin:0 0 4px}
-.atc.gnd .who{background:var(--amb)!important}.you{color:var(--cyan)}.you .who{background:var(--cyan)!important}
+.atc.gnd .who{background:var(--amb)!important}#log p.oth{opacity:.68}#log p.plt .who{background:#5fb6c9!important}.you{color:var(--cyan)}.you .who{background:var(--cyan)!important}
 .prm{color:var(--mag)}.prm .who{background:var(--mag)!important}
 .hint{opacity:.6;font-size:10px;white-space:nowrap}.gr{font-size:11px;color:var(--dim)}.gr .sc{font:700 11.5px var(--m);margin-right:6px}
 .ok{color:var(--grn)}.half{color:var(--amb)}.no{color:var(--red)}
@@ -1910,9 +1910,11 @@ window.__mdl={MDL,plane,paintLivery};
 // ---- The airline gate at the FBO (models/, credited in CREDITS.md): a Coral Air 737 MAX 8 parked nose-in, a jet bridge on a fixed walkway from the FBO to its
 // front door, a catering truck at its back door raising its box to it and lowering it again. Scenery only: nothing here is taxied into, talked about or graded,
 // and it stands clear of every taxi route. Loaded after the sim is up; if it cannot load, the ramp is as it was.
-// Airfield metres (x across toward the ramp, a along the runway). The 737's doors, measured on the model: L1/R1 5.0 m behind the nose, L2/R2 31.8 m, sills 2.27 m.
+// Airfield metres (x across toward the ramp, a along the runway). The 737's doors, measured on the model: L1/R1 5.0 m behind the nose, L2/R2 31.8 m, sills 2.67 m on its gear.
 const RAMP={ready:false,failed:false,info:{},g:null,mixer:null,act:null,inView:false,hold:null,
   jet:{nose:[274,707],len:39.52},                 // 737 MAX 8, 39.52 m long; centreline a 707, nose toward the FBO
+  raise:0.40,                                      // the model has no landing gear (it lay on its engines): gear built here, the airframe 0.40 m up (engines 0.4 m clear, sills 2.67 m)
+  gearZ:{main:0.05,nose:16.6},                     // gear stations, metres ahead of the model's middle: mains under its wheel wells, the nose gear 3.2 m behind the nose
   rot:[269,722.85],                                 // jet bridge rotunda: 14.3 m straight out from L1 (269, 708.8), so its cab meets the door square on
   truck:[242.1,700.05],                            // catering truck square to R2 (242.1, 705.2): raised, its platform reaches the skin; its cab stays 0.6 m clear
   cyc:{down:45,up:160,lift:1,lower:1.3},phase:'up',pt:0};
@@ -1926,14 +1928,32 @@ const RAMP={ready:false,failed:false,info:{},g:null,mixer:null,act:null,inView:f
     RAMP.info[key]={size:[sz.x,sz.y,sz.z].map(v=>+(v*k).toFixed(2)),k:+k.toFixed(4)};
     const w=new THREE.Group();sc.position.set(-c.x,-b.min.y,-c.z);w.scale.setScalar(k);w.add(sc);
     w.traverse(n=>{if(!n.isMesh)return;n.castShadow=n.receiveShadow=true;const m=n.material;if(m&&m.isMeshStandardMaterial&&!m.transparent)shadeStd(m);});fxAll(w);return w;};
+  // the 737's landing gear (its model has none): two main gears of two wheels each under the wing, a twin-wheel nose gear; each leg folds about its top,
+  // the mains inward into their wells, the nose gear forward into the nose (fold 0 down, 1 up). Metres, in the model's own frame (+z forward, +x its left).
+  const buildGear=par=>{const met=SM(0xa7adb3,0.35,0.75),dark=SM(0x2a2c30,0.6,0.4),tyre=SM(0x18191b,0.9,0),hub=SM(0xc9ced3,0.4,0.6),G={legs:[],fold:0};
+    const tyreG=(r,w)=>new THREE.CylinderGeometry(r,r,w,20).rotateZ(PI/2),hubG=(r,w)=>new THREE.CylinderGeometry(r*0.55,r*0.55,w+0.02,14).rotateZ(PI/2);
+    const R0=-RAMP.raise;   // ground level in this frame (the body is raised)
+    const leg=(x,z,top,r,w,spread,axisZ)=>{const pv=new THREE.Group();pv.position.set(x,R0+top,z);par.add(pv);
+      const len=top-r,P=(geo,mat,px,py,pz)=>{const m=new THREE.Mesh(geo,mat);m.position.set(px,py,pz);m.castShadow=true;m.receiveShadow=true;pv.add(m);return m;};
+      P(new THREE.CylinderGeometry(axisZ?0.09:0.13,axisZ?0.09:0.13,len,10),met,0,-len/2,0);                         // oleo strut
+      P(new THREE.CylinderGeometry(axisZ?0.12:0.17,axisZ?0.12:0.17,len*0.45,10),dark,0,-len*0.3,0);                  // its upper cylinder
+      P(new THREE.BoxGeometry(spread+w*0.6,0.12,0.18),met,0,-len,0);                                                    // axle
+      [-1,1].forEach(sd=>{P(tyreG(r,w),tyre,sd*spread/2,-len,0);P(hubG(r,w),hub,sd*spread/2,-len,0);});
+      if(!axisZ)P(new THREE.BoxGeometry(0.08,len*0.7,0.08),met,x>0?-0.28:0.28,-len*0.45,-0.25).rotation.z=x>0?0.32:-0.32;   // side brace
+      G.legs.push({pv,axisZ,side:Math.sign(x)});return pv;};
+    leg(2.86,RAMP.gearZ.main,2.25,0.56,0.38,0.88,false);leg(-2.86,RAMP.gearZ.main,2.25,0.56,0.38,0.88,false);leg(0,RAMP.gearZ.nose,1.55,0.345,0.22,0.42,true);
+    G.set=f=>{G.fold=f;G.legs.forEach(L=>{if(L.axisZ)L.pv.rotation.x=-f*PI*0.5;else L.pv.rotation.z=L.side*f*PI*0.5;L.pv.visible=f<0.97;});};
+    return G;};
   // stand-in boxes for the projected shadows of the tiers without shadow maps: [w, h, d, x, y, z] in the group's own metres
   const shadowsOf=(par,boxes)=>boxes.forEach(q=>{const o=new THREE.Object3D();o.geometry=new THREE.BoxGeometry(q[0],q[1],q[2]);o.position.set(q[3],q[4],q[5]);par.add(o);addPShadow(o);});
   Promise.all([get('coral_air_737_max_8'),get('aerobridge'),get('airport_catering_truck')]).then(([jet,br,tr])=>{
     const g=new THREE.Group();apt.add(g);RAMP.g=g;
     const put=(obj,x,a,ry)=>{const h=new THREE.Group();h.position.set(x,0,zOf(a));h.rotation.y=ry||0;if(obj)h.add(obj);g.add(h);return h;};
     // the 737: its nose is model +z, turned to +x; fitted about its middle, half a length behind the nose
-    const J=RAMP.jet,jg=RAMP.jetG=put(fit(jet,{len:J.len},'jet'),J.nose[0]-J.len/2,J.nose[1],PI/2);
-    shadowsOf(jg,[[3.7,3.6,38,0,2.6,0],[34,0.35,4.5,0,1.9,-1.5],[14,0.3,3,0,4.6,-16.5],[0.3,6,4,0,8,-17.5]]);
+    const J=RAMP.jet,jm=fit(jet,{len:J.len},'jet'),jb=new THREE.Group(),jo=new THREE.Group();
+    jb.position.set(0,RAMP.raise,RAMP.gearZ.main);jo.position.z=-RAMP.gearZ.main;jo.add(jm);jb.add(jo);RAMP.jetB=jb;RAMP.gear=buildGear(jo);
+    const jg=RAMP.jetG=put(jb,J.nose[0]-J.len/2,J.nose[1],PI/2);
+    shadowsOf(jg,[[3.7,3.6,38,0,3.0,0],[34,0.35,4.5,0,2.3,-1.5],[14,0.3,3,0,5.0,-16.5],[0.3,6,4,0,8.4,-17.5]]);
     // the jet bridge: its rotunda (model x -2.4) at the origin, pointing -a (model +x) at the door; its ground plate left out
     const bg=RAMP.bridgeG=put(fit(br,{k:3,drop:/^Plane\.?003/,at:[-2.4,0]},'bridge'),RAMP.rot[0],RAMP.rot[1],-PI/2);
     shadowsOf(bg,[[14,2.7,2,7,4.6,0],[1.2,3.3,1.2,0,1.6,0]]);
@@ -1961,23 +1981,214 @@ const RAMP={ready:false,failed:false,info:{},g:null,mixer:null,act:null,inView:f
     {const cg=new THREE.ConeGeometry(0.17,0.72,12).translate(0,0.36,0),om=SM(0xff6a13,0.6,0),bm=new THREE.Mesh(new THREE.BoxGeometry(0.42,0.04,0.42),SM(0x1d1f22,0.9,0));
       [[J.nose[0]-27.7,J.nose[1]+19.6],[J.nose[0]-27.7,J.nose[1]-19.6],[J.nose[0]-41.6,J.nose[1]]].forEach(q=>{const c=put(new THREE.Mesh(cg,om),q[0],q[1],0);c.children[0].castShadow=true;const b2=bm.clone();b2.position.y=0.02;c.add(b2);
         const ring=new THREE.Mesh(new THREE.CylinderGeometry(0.105,0.13,0.12,12),SM(0xf2f2f2,0.5,0));ring.position.y=0.42;c.add(ring);fxAll(c);});}
-    if(tr.animations&&tr.animations.length){RAMP.mixer=new THREE.AnimationMixer(tr.scene);const A=RAMP.act=RAMP.mixer.clipAction(tr.animations[0]);A.setLoop(THREE.LoopOnce,1);A.clampWhenFinished=true;A.play();
+    if(tr.animations&&tr.animations.length){
+      {const f=1.23,LIFT=/^(Container|Liftingframe_1|Liftingframe_2|Liftingframe_2_rail|Hydraulics_Piston0|Hydraulics_Piston1)\.(position|quaternion)$/,q0=new THREE.Quaternion(),q=new THREE.Quaternion();
+        tr.animations[0].tracks.forEach(tk=>{if(!LIFT.test(tk.name))return;const v=tk.values,n=tk.getValueSize();
+          if(n===3){for(let i=3;i<v.length;i+=3)for(let c=0;c<3;c++)v[i+c]=v[c]+(v[i+c]-v[c])*f;}
+          else if(n===4){q0.fromArray(v,0);for(let i=4;i<v.length;i+=4){q.fromArray(v,i);q.copy(q0.clone().slerp(q,f));q.toArray(v,i);}}});}
+      RAMP.mixer=new THREE.AnimationMixer(tr.scene);const A=RAMP.act=RAMP.mixer.clipAction(tr.animations[0]);A.setLoop(THREE.LoopOnce,1);A.clampWhenFinished=true;A.play();
       RAMP.info.clip=+tr.animations[0].duration.toFixed(1);RAMP.pt=Math.random()*RAMP.cyc.up;RAMP.mixer.update(0);}
     RAMP.ready=true;
   }).catch(e=>{RAMP.failed=true;console.warn('Airline gate models not loaded; the ramp stays as it was',e&&e.message);});})();
 // the truck's day: down, its box up to the door (the model's own 84 s lift), a while there, down again; and is the gate in view (for the credit line)
 {const fr=new THREE.Frustum(),pm=new THREE.Matrix4(),sph=new THREE.Sphere(new THREE.Vector3(),40);let n=0,last=-1;
   frameHooks.push((s,dt)=>{if(!RAMP.ready)return;
-    if(RAMP.act){const C=RAMP.cyc,A=RAMP.act,D=A.getClip().duration-0.01;let t;RAMP.pt+=dt;
+    if(RAMP.act){const C=RAMP.cyc,A=RAMP.act,D=A.getClip().duration-0.01;let t;RAMP.pt+=dt*(TR.frozen?0:(TR.warp||1));
+      if(RAMP.cycleOn===false){if(RAMP.phase==='up'){RAMP.phase='lower';RAMP.pt=0;}else if(RAMP.phase==='lift'){const tt=Math.min(D,RAMP.pt*C.lift);RAMP.phase='lower';RAMP.pt=(D-tt)/C.lower;}}
       if(RAMP.hold!=null)t=Math.min(D,RAMP.hold);
-      else if(RAMP.phase==='down'){t=0;if(RAMP.pt>C.down){RAMP.phase='lift';RAMP.pt=0;}}
+      else if(RAMP.phase==='down'){t=0;if(RAMP.pt>C.down&&RAMP.cycleOn!==false){RAMP.phase='lift';RAMP.pt=0;}}
       else if(RAMP.phase==='lift'){t=Math.min(D,RAMP.pt*C.lift);if(t>=D){RAMP.phase='up';RAMP.pt=0;}}
       else if(RAMP.phase==='up'){t=D;if(RAMP.pt>C.up){RAMP.phase='lower';RAMP.pt=0;}}
       else{t=Math.max(0,D-RAMP.pt*C.lower);if(t<=0){RAMP.phase='down';RAMP.pt=0;}}
       if(Math.abs(t-last)>1e-4){A.time=t;RAMP.mixer.update(0);last=t;}}
     if((n++%10)===0){sph.center.set(258,3,zOf(712));apt.localToWorld(sph.center);pm.multiplyMatrices(cam.projectionMatrix,cam.matrixWorldInverse);fr.setFromProjectionMatrix(pm);
-      RAMP.inView=fr.intersectsSphere(sph)&&cam.position.distanceTo(sph.center)<3000;}});}
+      RAMP.inView=fr.intersectsSphere(sph)&&cam.position.distanceTo(sph.center)<3000;
+      if(!RAMP.inView&&RAMP.jetG&&RAMP.jetG.visible){RAMP.jetG.getWorldPosition(sph.center);sph.radius=25;RAMP.inView=fr.intersectsSphere(sph)&&cam.position.distanceTo(sph.center)<6000;sph.radius=40;}}});}
 window.__ramp=RAMP;
+// ---- Airliner traffic (docs/FLIGHT-ROADMAP.md, item 8): Gate 1's 737 turns round, is pushed back by a tug, taxis out and departs; later another lands,
+// taxis in and parks at the gate, the jet bridge and the catering truck coming back to it. Timed around the person (or bot) flying the trainer so the
+// airliner never shares the runway or Alpha with them: it only enters Alpha and takes off while they are up in the pattern, only lands while they cannot
+// need the runway, and goes around if the runway is not clear on short final. Tower and Ground talk to it on their frequencies (heard when tuned there):
+// background only, never a call for you to read back, never graded. Nothing here touches the flight model, the session or its marks.
+const TR={st:'park',t:0,P:{free:true},M:null,M2:null,tug:null,tugM:null,flt:null,lvl:0,lines:[],onRadio:null,gear:0,pitch:0,bank:0,ext:1,goAround:false,said:{}};
+{
+  const FLIGHTS=[['418','four eighteen'],['521','five twenty-one'],['237','two thirty-seven'],['806','eight oh six'],['1192','eleven ninety-two'],['365','three sixty-five']];
+  const say=(fac,who,text)=>{TR.lines.push({fac,who,text});if(TR.onRadio)try{TR.onRadio(fac,who,text);}catch(e){}};
+  const cs=()=>'Coral '+TR.flt[1];
+  // paths: a point every metre or so, built like a turtle from a pose (psi degrees: 0 toward +x, 90 toward +a, left turns positive)
+  const mkPath=(x,a,psi)=>({pts:[{x,a,y:0,v:0}],x,a,psi});
+  const ahead=(P,d,v)=>{const n=Math.max(1,Math.ceil(d)),r=P.psi*D2R;for(let i=1;i<=n;i++){P.x+=Math.cos(r)*d/n;P.a+=Math.sin(r)*d/n;P.pts.push({x:P.x,a:P.a,y:0,v});}return P;};
+  const turn=(P,rad,deg,v)=>{const L=Math.abs(deg)*D2R*rad,n=Math.max(2,Math.ceil(L)),dp=deg/n,step=L/n;
+    for(let i=1;i<=n;i++){const r0=P.psi*D2R;P.psi+=dp;const rm=(r0+P.psi*D2R)/2;P.x+=Math.cos(rm)*step;P.a+=Math.sin(rm)*step;P.pts.push({x:P.x,a:P.a,y:0,v});}return P;};
+  const mover=(P,o)=>{const p=P.pts,cum=[0];if(p.length>1)p[0].v=p[1].v;   // (the first point takes the speed of the way ahead)
+    for(let i=1;i<p.length;i++)cum.push(cum[i-1]+Math.hypot(p[i].x-p[i-1].x,p[i].a-p[i-1].a,p[i].y-p[i-1].y));
+    return{pts:p,cum,len:cum[cum.length-1],d:0,v:o.v0||0,acc:o.acc||0.6,dec:o.dec||1,rev:!!o.rev,done:false,end:o.end!==false};};
+  const at=(M,d)=>{const c=M.cum;let lo=0,hi=c.length-1;if(d<=0)return M.pts[0];if(d>=M.len)return M.pts[hi];
+    while(hi-lo>1){const m=(lo+hi)>>1;if(c[m]<=d)lo=m;else hi=m;}const t=(d-c[lo])/((c[hi]-c[lo])||1),A=M.pts[lo],B=M.pts[hi];
+    return{x:A.x+(B.x-A.x)*t,a:A.a+(B.a-A.a)*t,y:A.y+(B.y-A.y)*t,v:A.v,p:A.p==null?null:A.p+((B.p==null?A.p:B.p)-A.p)*t,g:A.g};};
+  const run=(M,dt)=>{if(!M||M.done)return;let vt=at(M,M.d).v;const look=Math.min(1200,M.v*M.v/(2*M.dec)+12);
+    for(let dd=3;dd<look;dd+=3){const q=at(M,M.d+dd);const al=Math.sqrt(q.v*q.v+2*M.dec*dd);if(al<vt)vt=al;}
+    if(M.end)vt=Math.min(vt,Math.sqrt(2*M.dec*Math.max(0,M.len-M.d-0.15)));
+    M.v=M.v<vt?Math.min(vt,M.v+M.acc*dt):Math.max(vt,M.v-M.dec*dt);M.d+=M.v*dt;
+    if(M.d>=M.len-0.1&&(M.v<0.25||!M.end)){M.d=M.len;M.v=M.end?0:M.v;M.done=true;}};
+  const poseOf=M=>{const p=at(M,M.d),p0=at(M,M.d-1.6),p1=at(M,M.d+1.6);let dx=p1.x-p0.x,da=p1.a-p0.a;if(M.rev){dx=-dx;da=-da;}
+    return{x:p.x,a:p.a,y:p.y,yaw:Math.atan2(dx,-da),p:p.p,g:p.g,v:M.v};};
+  const place=(obj,q)=>{obj.position.set(q.x,q.y||0,zOf(q.a));obj.rotation.y=q.yaw;};
+  const placeTruck=q=>place(RAMP.truckG,{x:q.x,a:q.a,y:0,yaw:q.yaw+PI});   // (the truck's cab is its model's -z)
+  const yawDiff=(a,b)=>Math.atan2(Math.sin(a-b),Math.cos(a-b));
+
+  // the places on the ramp (airfield metres): the gate pose, the truck's and the tug's waiting spots
+  const GATE={x:254.24,a:707},TRUCK_HOME={x:287.1,a:680.05},TUG_HOME={x:288,a:731};
+  // the 737's departure: pushed back tail south to face north; north, west along the top of the ramp, south on Alpha, right into Alpha One, to the hold line
+  const pushPath=()=>turn(mkPath(GATE.x,GATE.a,180),20,90,1.3);
+  const outApron=()=>{const P=mkPath(234.24,687,90);ahead(P,73,5);turn(P,20,90,3.5);ahead(P,99.24,6);return P;};
+  const outAlpha=()=>{const P=mkPath(115,780,180);turn(P,20,90,3.5);ahead(P,715,9);turn(P,15,-90,3.5);ahead(P,20.2,4);return P;};
+  // line up and go: from the hold at (59.8, 30) onto the centreline at a 45, the roll, rotation at a 1105, lift-off at a 1245, climb, a right turn away
+  const takeoff=()=>{const P=mkPath(59.8,30,180);ahead(P,44.8,5);turn(P,15,-90,4);const h0=P.pts.length;ahead(P,4500,86);const hR=1060,hL=hR+140;
+    turn(P,1500,-90,92);ahead(P,9000,105);
+    let h=0;for(let i=1;i<P.pts.length;i++){const A=P.pts[i-1],B=P.pts[i];h+=Math.hypot(B.x-A.x,B.a-A.a);B.h=h;}
+    const H0=P.pts[h0].h;P.pts.forEach(q=>{const hh=(q.h||0)-H0;
+      if(hh<hR){q.y=0;q.p=0;}else if(hh<hL){q.y=0;q.p=8*(hh-hR)/(hL-hR);}else{q.y=Math.min(1250,0.088*(hh-hL)+0.00000075*(hh-hL)*(hh-hL));q.p=null;q.g='up';}});return P;};
+  // the arrival: a 3° final from 14 km to the aiming point (a 300), the flare, touchdown about a 330, rollout, right at Alpha Four, Alpha south, into the gate
+  const arrival=()=>{const P=mkPath(0,-14000,90);ahead(P,8000,75);ahead(P,6330,70);const iT=P.pts.length-1;ahead(P,1149,10);
+    turn(P,15,-90,4);ahead(P,65,7);turn(P,15,-90,4);ahead(P,679,9);turn(P,20,90,3.5);ahead(P,65,5);turn(P,20,-90,3);ahead(P,33,4);turn(P,20,90,3);ahead(P,34.24,2.2);
+    const T3=Math.tan(3*D2R),fa=300-12/T3,fl=330-fa;
+    P.pts.forEach((q,i)=>{const a=q.a;if(i>iT){q.y=0;q.p=0;if(q.a>330&&q.a<1479&&Math.abs(q.x)<1)q.v=Math.max(10,Math.sqrt(Math.max(0,4900-4.8*(q.a-330))));return;}
+      if(a<=fa){q.y=(300-a)*T3;q.p=2.4;}else{const u=Math.min(1,(a-fa)/fl),s0=-T3*fl,s1=-0.004*fl;   // Hermite: 12 m with the glide slope's slope, to 0 m nearly level
+        q.y=Math.max(0,(2*u*u*u-3*u*u+1)*12+(u*u*u-2*u*u+u)*s0+(-2*u*u*u+3*u*u)*0+(u*u*u-u*u)*s1);q.p=2.4+3.2*u;}});
+    for(let i=iT+1,k=0;i<P.pts.length&&k<160;i++,k++)P.pts[i].p=5.6*(1-k/160);   // the nose comes down after touchdown
+    P.iT=iT;return P;};
+  // a go-around: power up, climb straight ahead at about 6°, then (like a departure) a right turn away
+  const goAround=(from)=>{const P=mkPath(from.x,from.a,90);ahead(P,5000,88);turn(P,1500,-90,95);ahead(P,9000,105);let h=0;
+    P.pts.forEach((q,i)=>{if(i)h+=Math.hypot(q.x-P.pts[i-1].x,q.a-P.pts[i-1].a);q.y=Math.min(1250,from.y+0.105*h);q.g='up';q.p=null;});return P;};
+  // the truck: back away from R2 and round, then forward along the south of the ramp to its spot by the FBO (and the same back)
+  const truckAway=()=>[turn(mkPath(242.1,700.05,-90),20,-90,1.6),ahead(mkPath(222.1,680.05,0),65,5)];
+  const truckBack=()=>{const P=mkPath(TRUCK_HOME.x,TRUCK_HOME.a,180);ahead(P,65,5);turn(P,20,-90,2.2);return P;};
+  // the tug: from its spot north of the walkway, back out, under the walkway, round to the nose (and after the push, back out of the way and home)
+  const tugIn=()=>[ahead(mkPath(TUG_HOME.x,TUG_HOME.a,180),14,2),(()=>{const P=mkPath(274,731,0);turn(P,8,-90,2.4);ahead(P,10.7,2.6);turn(P,5.3,-90,2);return P;})()];
+  const tugOut=()=>[ahead(mkPath(234.24,709.5,90),29.5,2),(()=>{const P=mkPath(234.24,739,-90);turn(P,8,90,2.4);ahead(P,45.76,4);return P;})()];
+
+  // the tug: a low yellow tractor and its tow bar, built here
+  const buildTug=()=>{const g=new THREE.Group(),y=SM(0xe1ad1c,0.55,0.15),dk=SM(0x1d1f22,0.85,0),gl=new THREE.MeshStandardMaterial({color:lin(0x0e1a22),roughness:0.08,metalness:0.6}),met=SM(0x9aa1a8,0.4,0.7);
+    const P=(geo,mat,x,yy,z)=>{const m=new THREE.Mesh(geo,mat);m.position.set(x,yy,z);m.castShadow=m.receiveShadow=true;g.add(m);return m;};
+    P(new THREE.BoxGeometry(2.3,0.75,4.8),y,0,0.75,0);P(new THREE.BoxGeometry(2.35,0.2,4.85),dk,0,0.42,0);
+    P(new THREE.BoxGeometry(1.5,0.95,1.3),y,0,1.6,-1.6);P(new THREE.BoxGeometry(1.52,0.6,1.32),gl,0,1.72,-1.6);P(new THREE.BoxGeometry(1.6,0.08,1.4),dk,0,2.1,-1.6);
+    [[1,1.5],[-1,1.5],[1,-1.5],[-1,-1.5]].forEach(q=>P(new THREE.CylinderGeometry(0.42,0.42,0.35,14).rotateZ(PI/2),dk,q[0]*1.08,0.42,q[1]));
+    const bar=P(new THREE.CylinderGeometry(0.06,0.06,3.5,8).rotateX(PI/2),met,0,0.55,2.4+1.75);bar.userData.bar=true;
+    const b=new THREE.Object3D();b.geometry=new THREE.BoxGeometry(2.3,1.2,4.8);b.position.y=0.8;g.add(b);addPShadow(b);fxAll(g);return g;};
+
+  // the jet bridge telescopes: its tunnels and cab slide back along it (ext 1 docked, 0 drawn back 4 m), worked out from the parts as they load
+  const bridgeParts=()=>{const bg=RAMP.bridgeG;if(!bg||TR.bp)return;bg.updateMatrixWorld(true);let root=null;bg.traverse(o=>{if(o.name==='RootNode')root=o;});if(!root)return;
+    const out=[],box=new THREE.Box3(),c=new THREE.Vector3(),o0=new THREE.Vector3(),o1=new THREE.Vector3();
+    root.children.forEach(n=>{box.setFromObject(n);if(box.isEmpty())return;box.getCenter(c);bg.worldToLocal(c);const k=c.x>7.8?1:c.x>4.5?0.5:0;if(!k)return;
+      o0.set(c.x,c.y,c.z);o1.set(c.x-1,c.y,c.z);bg.localToWorld(o0);bg.localToWorld(o1);n.parent.worldToLocal(o0);n.parent.worldToLocal(o1);
+      out.push({n,base:n.position.clone(),dir:o1.sub(o0).multiplyScalar(k)});});TR.bp=out;};
+  const setBridge=ext=>{if(!TR.bp)return;const d=(1-ext)*4;TR.bp.forEach(q=>{q.n.position.copy(q.base).addScaledVector(q.dir,d);});};
+
+  // lights on the 737: red/green at the wingtips, white tail, a red beacon top and bottom while its engines run, strobes on the runway and in the air
+  const lightsOn=jo=>{const P=[],Cc=[],Sz=[],K=[],BASE=[],add=(x,y,z,col,sz,kind)=>{P.push(x,y-RAMP.raise,z);Cc.push(0,0,0);Sz.push(sz);K.push(kind);BASE.push(col);};
+    add(17.6,3.1,-5.6,[1.2,0.05,0.03],0.45,'nav');add(-17.6,3.1,-5.6,[0.04,1.1,0.2],0.45,'nav');add(0,5.9,-19.6,[0.8,0.8,0.76],0.35,'nav');
+    add(0,5.2,-2,[1.4,0.08,0.04],0.9,'bcn');add(0,0.85,-2,[1.4,0.08,0.04],0.9,'bcn');add(17.7,3.1,-5.7,[1.6,1.6,1.7],1.5,'stb');add(-17.7,3.1,-5.7,[1.6,1.6,1.7],1.5,'stb');
+    add(1.6,1.6,4.5,[1.8,1.7,1.5],2.8,'ldg');add(-1.6,1.6,4.5,[1.8,1.7,1.5],2.8,'ldg');
+    const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(P,3));g.setAttribute('color',new THREE.Float32BufferAttribute(Cc,3));g.setAttribute('size',new THREE.Float32BufferAttribute(Sz,1));
+    const m=lightMat();m.uniforms=PU.glow.material.uniforms;   // (the same intensity, pixel ratio and night level as the trainer's own airplane's lamps)
+    const pts=new THREE.Points(g,m);pts.frustumCulled=false;pts.renderOrder=20;jo.add(pts);TR.lights={g,K,BASE};};
+  let clock=0;
+  const lights=(eng,run,ldg)=>{const L=TR.lights;if(!L)return;clock+=0.016;const c=L.g.attributes.color;
+    L.K.forEach((k,i)=>{const on=k==='nav'?(eng||TR.st!=='park'):k==='bcn'?(eng&&(clock%1.1)<0.12):k==='stb'?(run&&(clock%1.25)<0.05):ldg,b=L.BASE[i];c.setXYZ(i,on?b[0]:0,on?b[1]:0,on?b[2]:0);});c.needsUpdate=true;};
+
+  TR.reset=mode=>{TR.mode=mode;TR.st='park';TR.t=0;TR.parkFor=mode==='final'?1e9:70+Math.random()*70;TR.M=TR.M2=TR.tugM=null;TR.lines.length=0;TR.lvl=0;TR.goAround=false;TR.said={};
+    if(!RAMP.ready)return;const jg=RAMP.jetG;jg.visible=true;place(jg,{x:GATE.x,a:GATE.a,y:0,yaw:PI/2});TR.pitch=TR.bank=0;RAMP.jetB.rotation.set(0,0,0);TR.gear=0;RAMP.gear.set(0);
+    TR.ext=1;setBridge(1);place(RAMP.truckG,{x:242.1,a:700.05,yaw:0});RAMP.cycleOn=true;if(TR.tug)place(TR.tug,{x:TUG_HOME.x,a:TUG_HOME.a,yaw:PI/2});
+    TR.flt=FLIGHTS[Math.random()*FLIGHTS.length|0];};
+  TR.setInfo=p=>{TR.P=TR.forceP||p||{free:true};};   // (forceP, warp: for the picture tools only)
+
+  /*TRAFFIC-RULES*/
+  // the person's (or bot's) flight, as far as the airliner needs it: will they need Alpha or the runway soon? (estimate of seconds to their touchdown)
+  const est=P=>{if(P.free)return 1e9;if(P.onGround)return 0;const gs=Math.max(35,P.gs*0.5144);
+    switch(P.phase){case'UPWIND':return 170;case'CROSSWIND':return 140;case'DOWNWIND':return Math.max(0,(P.a-AP.baseA)/gs)+100;case'BASE':return 70;case'FINAL':return Math.max(0,(300-P.a)/gs);default:return 0;}};
+  const air=P=>!P.free&&!P.onGround&&['UPWIND','CROSSWIND','DOWNWIND'].includes(P.phase);
+  // (Alpha to the hold takes it about 95 s; after touching down a pilot needs about 40 s more before they can be on Alpha)
+  const canAlphaOut=P=>P.free||(air(P)&&est(P)>90);
+  const canGo=P=>P.free||(!P.onGround&&['CROSSWIND','DOWNWIND'].includes(P.phase)&&est(P)>80);
+  const canArrive=P=>{if(TR.mode==='final')return false;if(P.free)return true;
+    if(P.onGround&&P.phase==='TAXI'&&P.lap>=P.lastLap)return true;                                      // taxiing in after the last landing
+    return P.mode==='full'&&P.lap<P.lastLap&&P.phase==='DOWNWIND'&&P.a<0&&!P.onGround;};               // a touch-and-go lap, past the threshold on downwind
+  const runwayClear=P=>{if(P.free)return true;const onRwy=P.onGround&&Math.abs(P.c)<AP.wid/2+12&&P.a>-60&&P.a<AP.len+60;
+    const onFinal=!P.onGround&&(P.phase==='FINAL'||P.phase==='BASE');return !onRwy&&!onFinal&&!['ROLL','LINEUP'].includes(P.phase);};
+  const alphaInClear=P=>P.free||!(P.onGround&&Math.abs(-P.c-AP.tx)<14&&P.a>690);
+  /*END-TRAFFIC-RULES*/
+
+  const go=(st)=>{TR.st=st;TR.t=0;};
+  TR.update=(dt)=>{if(!RAMP.ready||!dt)return;if(!TR.flt)TR.reset(TR.mode||'quick');bridgeParts();TR.t+=dt;const P=TR.P,jg=RAMP.jetG,J=RAMP.jetB;let eng=false,rwy=false,ldg=false;
+    const truckDocked=()=>RAMP.truckMode!=='away';
+    switch(TR.st){
+      case'park':if(TR.mode&&TR.mode!=='final'&&TR.t>TR.parkFor){RAMP.cycleOn=false;go('prep');}break;
+      case'prep':{   // the truck down and away, the bridge drawn back, the tug to the nose
+        if(!TR.said.ready){TR.said.ready=1;say('Ground','PILOT','Pinecrest Ground, '+cs()+', gate one, ready to push.');}
+        if(TR.t>4&&!TR.said.push){TR.said.push=1;say('Ground','GND',cs()+', Pinecrest Ground, push back approved, tail south.');say('Ground','PILOT','Push approved, tail south, '+cs()+'.');}
+        if(!TR.M2&&RAMP.phase==='down'&&RAMP.truckMode!=='away'){const [a,b]=truckAway();TR.M2=[mover(a,{rev:true,acc:0.4,dec:0.6}),mover(b,{acc:0.5,dec:0.8})];RAMP.truckMode='leaving';}
+        if(TR.M2&&RAMP.truckMode!=='away'){const m=TR.M2[0].done?TR.M2[1]:TR.M2[0];run(m,dt);placeTruck(poseOf(m));if(TR.M2[1].done){RAMP.truckMode='away';}}
+        if(RAMP.truckMode==='leaving'||RAMP.truckMode==='away'){TR.ext=Math.max(0,TR.ext-dt*0.12);setBridge(TR.ext);}
+        if(TR.ext<=0&&!TR.tugM){const [a,b]=tugIn();TR.tugM=[mover(a,{rev:true,acc:0.4,dec:0.6}),mover(b,{acc:0.5,dec:0.6})];}
+        if(TR.tugM){const m=TR.tugM[0].done?TR.tugM[1]:TR.tugM[0];run(m,dt);place(TR.tug,poseOf(m));}
+        if(TR.tugM&&TR.tugM[1].done&&RAMP.truckMode==='away'){TR.M=mover(pushPath(),{rev:true,acc:0.25,dec:0.35});go('push');}
+        break;}
+      case'push':{run(TR.M,dt);const q=poseOf(TR.M);place(jg,q);eng=TR.t>20;
+        // the tug rides at the nose gear, its bar on the gear: 16.6 m ahead of the jet's middle, the bar 3.5 m, the tug 2.4 m more, facing the jet
+        const f=q.yaw,nx=q.x+Math.sin(f)*(RAMP.gearZ.nose+5.9),na=q.a-Math.cos(f)*(RAMP.gearZ.nose+5.9);place(TR.tug,{x:nx,a:na,yaw:f+PI});
+        if(TR.M.done){const [a,b]=tugOut();TR.tugM=[mover(a,{rev:true,acc:0.4,dec:0.6}),mover(b,{acc:0.5,dec:0.7})];go('tugback');}break;}
+      case'tugback':{eng=true;const m=TR.tugM[0].done?TR.tugM[1]:TR.tugM[0];run(m,dt);place(TR.tug,poseOf(m));
+        if(TR.tugM[1].done&&TR.t>6){TR.M=mover(outApron(),{acc:0.35,dec:0.6});say('Ground','PILOT',cs()+', ready to taxi.');go('taxiApron');}break;}
+      case'taxiApron':{eng=true;run(TR.M,dt);place(jg,poseOf(TR.M));if(TR.M.done)go('holdApron');break;}
+      case'holdApron':{eng=true;if(canAlphaOut(P)&&TR.t>3){say('Ground','GND',cs()+', Runway three, taxi via Alpha.');say('Ground','PILOT','Runway three via Alpha, '+cs()+'.');TR.M=mover(outAlpha(),{acc:0.35,dec:0.6});go('taxiAlpha');}
+        else if(TR.t>3&&!TR.said.holdA){TR.said.holdA=1;say('Ground','GND',cs()+', hold position, traffic is a Cirrus on Alpha.');say('Ground','PILOT','Holding position, '+cs()+'.');}break;}
+      case'taxiAlpha':{eng=true;run(TR.M,dt);place(jg,poseOf(TR.M));if(TR.M.done){say('Tower','PILOT','Pinecrest Tower, '+cs()+', holding short Runway three, ready.');go('holdShort');}break;}
+      case'holdShort':{eng=true;if(TR.t>5&&canGo(P)){say('Tower','TWR',cs()+', Runway three, cleared for takeoff, turn right heading one two zero.');say('Tower','PILOT','Cleared for takeoff Runway three, right heading one two zero, '+cs()+'.');
+          TR.M=mover(takeoff(),{acc:2.3,dec:1.2,end:false});go('depart');}
+        else if(TR.t>9&&!TR.said.holdT){TR.said.holdT=1;say('Tower','TWR',cs()+', hold short Runway three, traffic in the pattern.');say('Tower','PILOT','Holding short, '+cs()+'.');}break;}
+      case'depart':{eng=true;rwy=true;ldg=true;run(TR.M,dt);const q=poseOf(TR.M);place(jg,q);if(q.g==='up'&&q.y>12)TR.gearUp=true;
+        if(TR.M.done||(q.y>900&&jg.position.distanceTo(cam.position)>9000)){jg.visible=false;go('gone');TR.gapFor=150+Math.random()*120;}break;}
+      case'gone':{if(TR.t>TR.gapFor&&canArrive(P)){TR.flt=FLIGHTS[(FLIGHTS.indexOf(TR.flt)+1+(Math.random()*3|0))%FLIGHTS.length];TR.M=mover(arrival(),{v0:75,acc:0.8,dec:2.4});TR.goAround=false;TR.said={};
+          jg.visible=true;TR.gear=1;RAMP.gear.set(1);say('Tower','PILOT','Pinecrest Tower, '+cs()+', seven mile final, Runway three.');go('arrive');}break;}
+      case'arrive':{eng=true;
+        // off the runway at Alpha Four, it waits there while the person taxis on Alpha north of the ramp
+        const q0=poseOf(TR.M);if(q0.x>60&&q0.x<96&&q0.a>1470&&!alphaInClear(P)){TR.M.v=Math.max(0,TR.M.v-3*dt);TR.M.d+=TR.M.v*dt;}else run(TR.M,dt);
+        const q=poseOf(TR.M);place(jg,q);const inAir=q.y>0.05;rwy=true;ldg=inAir||q.v>20;
+        if(TR.t>4&&!TR.said.land){TR.said.land=1;say('Tower','TWR',cs()+', Pinecrest Tower, Runway three, cleared to land, wind zero three zero at six.');say('Tower','PILOT','Cleared to land Runway three, '+cs()+'.');}
+        if(q.a>-9000&&TR.gear>0)TR.gearDown=true;
+        if(inAir&&((q.a>-1600&&q.a<-1400)||(q.a>-450&&q.a<-350))&&!TR.goAround&&!runwayClear(P)){TR.goAround=true;say('Tower','TWR',cs()+', go around, traffic on the runway.');say('Tower','PILOT','Going around, '+cs()+'.');
+          TR.M=mover(goAround(q),{v0:q.v,acc:1.2,dec:1,end:false});go('goaround');break;}
+        if(!inAir&&q.v<14&&!TR.said.exit){TR.said.exit=1;say('Tower','TWR',cs()+', turn right at Alpha Four, contact Ground one two one point niner.');say('Tower','PILOT','Right at Alpha Four, Ground, '+cs()+'.');}
+        if(TR.said.exit&&!TR.said.gnd&&q.x>40){TR.said.gnd=1;say('Ground','PILOT','Pinecrest Ground, '+cs()+', clear of Runway three at Alpha Four, taxi to gate one.');say('Ground','GND',cs()+', taxi to gate one via Alpha.');say('Ground','PILOT','Gate one via Alpha, '+cs()+'.');}
+        if(TR.M.done){go('dock');}break;}
+      case'goaround':{eng=true;rwy=true;run(TR.M,dt);const q=poseOf(TR.M);place(jg,q);TR.gearUp=q.y>20;if(TR.M.done||(q.y>900&&jg.position.distanceTo(cam.position)>9000)){jg.visible=false;go('gone');TR.gapFor=120;}break;}
+      case'dock':{   // engines off, the bridge out to the door, the truck back and up
+        eng=TR.t<12;if(TR.t>8){TR.ext=Math.min(1,TR.ext+dt*0.12);setBridge(TR.ext);}
+        if(TR.t>14&&!TR.M2b){TR.M2b=mover(truckBack(),{acc:0.5,dec:0.7});RAMP.truckMode='returning';}
+        if(TR.M2b){run(TR.M2b,dt);placeTruck(poseOf(TR.M2b));if(TR.M2b.done){TR.M2b=null;RAMP.truckMode='docked';RAMP.phase='down';RAMP.pt=0;RAMP.cycleOn=true;TR.parkFor=240+Math.random()*120;TR.M2=null;TR.tugM=null;go('park');}}
+        break;}
+    }
+    // the gear: up after lift-off, down on a long final (8 s either way)
+    if(TR.gearUp&&TR.gear<1){TR.gear=Math.min(1,TR.gear+dt/8);RAMP.gear.set(TR.gear);}if(TR.gearDown&&TR.gear>0){TR.gear=Math.max(0,TR.gear-dt/8);RAMP.gear.set(TR.gear);}
+    if(TR.gear>=1)TR.gearUp=false;if(TR.gear<=0)TR.gearDown=false;
+    // attitude: pitch from the path (or its climb), bank from its turning, both eased
+    if(TR.M&&['depart','arrive','goaround'].includes(TR.st)){const q=poseOf(TR.M),q2=at(TR.M,TR.M.d+25),q0=at(TR.M,TR.M.d-25);
+      const climb=Math.atan2(q2.y-q0.y,50)/D2R,pt=q.p!=null?q.p:climb+3.5,hd1=Math.atan2(q2.x-q.x,-(q2.a-q.a)),hd0=Math.atan2(q.x-q0.x,-(q.a-q0.a)),
+        turnRate=yawDiff(hd1,hd0)/Math.max(1,25/Math.max(5,q.v)),bk=q.y>15?Math.max(-25,Math.min(25,Math.atan(q.v*turnRate/9.81)/D2R)):0;
+      TR.pitch+=(pt-TR.pitch)*Math.min(1,dt*1.6);TR.bank+=(bk-TR.bank)*Math.min(1,dt*1.2);}
+    else{TR.pitch+=(0-TR.pitch)*Math.min(1,dt*2);TR.bank*=Math.max(0,1-dt*2);}
+    J.rotation.set(-TR.pitch*D2R,0,-TR.bank*D2R);
+    TR.lvl=!jg.visible?0:TR.st==='depart'&&jg.position.y<400?1:TR.st==='goaround'?0.95:TR.st==='arrive'&&TR.M&&poseOf(TR.M).y<=0.05&&TR.M.v>25?0.85:eng?(TR.st==='arrive'?0.45:0.3):0;
+    lights(eng,rwy,ldg);};
+  // where the airliner is (for SimBot.state().traffic) and how loud it is where the camera is
+  TR.state=()=>{if(!RAMP.ready||!RAMP.jetG||!RAMP.jetG.visible||!TR.flt||TR.st==='park')return[];   // (nothing before a flight has started, or while it stands at the gate)const jg=RAMP.jetG,a=L/2-jg.position.z,x=jg.position.x;
+    return[{callsign:'Coral '+TR.flt[0],type:'B38M',state:TR.st,x:+x.toFixed(1),a:+a.toFixed(1),c:+(-x).toFixed(1),altFt:Math.round(jg.position.y/C.FT),gsKt:TR.M?Math.round(TR.M.v/C.KT):0,heading:Math.round(((120-Math.atan2(-Math.cos(jg.rotation.y),Math.sin(jg.rotation.y))/D2R)%360+360)%360)}];};
+  TR.sound=()=>{if(!RAMP.ready||!TR.lvl)return{level:0,near:0};const p=new THREE.Vector3();RAMP.jetG.getWorldPosition(p);const d=Math.max(20,p.distanceTo(cam.position));return{level:TR.lvl,near:Math.min(1,Math.pow(120/d,1.25))};};
+  frameHooks.push((s,dt,simDt)=>{if(RAMP.ready&&!TR.tug){TR.tug=buildTug();apt.add(TR.tug);place(TR.tug,{x:TUG_HOME.x,a:TUG_HOME.a,yaw:PI/2});lightsOn(RAMP.jetB.children[0]);if(!TR.flt)TR.reset(TR.mode||'quick');}
+    TR.update(TR.frozen?0:simDt*(TR.warp||1));});
+}
+window.__traffic=TR;
 /* ---------- cabin: Perspective Touch+ style flight deck (two wide displays, twin touch controllers, side yokes, single power lever) ---------- */
 const EYE=new THREE.Vector3(-0.31,0.6,-0.3),INT={};
 const pfdC=cv(768,480),pg=pfdC.getContext('2d'),pfdTex=new THREE.CanvasTexture(pfdC),mfdC=cv(768,480),mg2=mfdC.getContext('2d'),mfdTex=new THREE.CanvasTexture(mfdC);
@@ -2470,7 +2681,7 @@ function frame(s,inp,dt,paused){
 }
 fx(taxiMat);setQuality('med');
 function setAircraft(k){const sr22=k==='sr22';buildPath(sr22?'sr22':'sr20');paintAcc.color.copy(lin(sr22?0x7d1420:0x163e7a));paintAcc2.color.copy(lin(sr22?0x2b2e33:0x8f9aa6));drawReg(sr22?'SR22':'SR20');mdlSetAc(k);}
-return{towerPos:twrPos,setAircraft,setLivery:mdlSetLivery,liveries:LIVERIES,get modelReady(){return MDL.ready;},get modelFailed(){return MDL.failed;},get livery(){return MDL.livery;},get modelShown(){return MDL.ready&&MDL.on===true;},get rampInView(){return RAMP.ready&&RAMP.inView;},setTrail(t){trailRef=t;},setCoach(on){guide.visible=!!on;},setPark(on){parkM.visible=!!on;},setTaxi,pfdCanvas:pfdC,thump(v){thump=Math.max(thump,v);},look(dx,dy){if(camMode==='cockpit'){lookHeld=true;lookIdle=0;lookY=clamp(lookY-dx*0.0045/ckZ,-2.3,2.3);lookP=clamp(lookP-dy*0.0045/ckZ,-0.9,1.1);}
+return{towerPos:twrPos,setAircraft,setLivery:mdlSetLivery,liveries:LIVERIES,get modelReady(){return MDL.ready;},get modelFailed(){return MDL.failed;},get livery(){return MDL.livery;},get modelShown(){return MDL.ready&&MDL.on===true;},get rampInView(){return RAMP.ready&&RAMP.inView;},trafficReset(m){TR.reset(m);},setTrafficInfo(p){TR.setInfo(p);},set onTraffic(f){TR.onRadio=f;},trafficState(){try{return TR.state();}catch(e){return[];}},trafficSound(){try{return TR.sound();}catch(e){return{level:0,near:0};}},setTrail(t){trailRef=t;},setCoach(on){guide.visible=!!on;},setPark(on){parkM.visible=!!on;},setTaxi,pfdCanvas:pfdC,thump(v){thump=Math.max(thump,v);},look(dx,dy){if(camMode==='cockpit'){lookHeld=true;lookIdle=0;lookY=clamp(lookY-dx*0.0045/ckZ,-2.3,2.3);lookP=clamp(lookP-dy*0.0045/ckZ,-0.9,1.1);}
     else if(camMode==='chase'){orbHeld=true;orbIdle=0;orbY+=dx*0.0062;if(orbY>PI)orbY-=PI*2;if(orbY<-PI)orbY+=PI*2;orbP=clamp(orbP+dy*0.0045,-0.38,1.1);}},
   lookEnd(){lookHeld=false;lookIdle=0;orbHeld=false;orbIdle=0;},zoom(f){if(camMode==='cockpit')ckZ=clamp(ckZ/f,1,3);else zoomK=clamp(zoomK*f,0.5,3.2);},orbitHome(){orbY=orbP=0;zoomK=1;ckZ=1;lookY=lookP=0;},setWeather(n){if(!WX[n]||n===wx)return;wx=n;applyTime(true);},get weather(){return wx;},WX,QUAL,layout:LAYOUT,_tex:texPNG,
   frame,resize,setQuality,nextCam,resetCam,setCam(m){camMode=m;camInit=false;peekCam=null;},
@@ -2585,7 +2796,7 @@ const Radio=(function(){let ctx=null,noise=null,hiss=null,voice=null,busy=0,endT
   function say(t,who){if(!opt.voice)return;init();if(ctx&&ctx.state==='suspended'){try{ctx.resume();}catch(e){}}
     const words=t.split(/\s+/).length,est=Math.max(1.2,words*0.3);
     if(!window.speechSynthesis){keyUp();setTimeout(keyDown,est*1000);return;}
-    try{const u=new SpeechSynthesisUtterance(spoken(t));voice=voice||pick();if(voice){u.voice=voice;u.lang=voice.lang;}else u.lang='en-US';u.rate=RATE[opt.grit|0]-(who==='GND'?0.06:0);u.pitch=PITCH[opt.grit|0]+(who==='GND'?0.22:0);u.volume=VOL[opt.grit|0];
+    try{const u=new SpeechSynthesisUtterance(spoken(t));voice=voice||pick();if(voice){u.voice=voice;u.lang=voice.lang;}else u.lang='en-US';u.rate=RATE[opt.grit|0]-(who==='GND'?0.06:0)+(who==='PILOT'?0.07:0);u.pitch=PITCH[opt.grit|0]+(who==='GND'?0.22:0)+(who==='PILOT'?-0.14:0);u.volume=VOL[opt.grit|0];
       let fin=false;const end=()=>{if(fin)return;fin=true;done();};busy++;
       u.onstart=()=>{keyUp();};u.onend=end;u.onerror=end;if(busy===1)keyUp();
       speechSynthesis.speak(u);setTimeout(end,(est*1.6+4)*1000+speechSynthesis.pending*4000);}catch(e){keyUp();setTimeout(keyDown,est*1000);}}
@@ -2629,6 +2840,12 @@ const Sfx=(function(){let ctx=null,n=null,tdSeen=0,ntSeen=0,duck=1;
     const g=ctx.createGain(),peak=Math.max(0.0002,0.16*k*near);g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(peak,t+0.008);g.gain.setValueAtTime(peak*0.85,t+len*0.35);g.gain.exponentialRampToValueAtTime(0.0006,t+len);
     tn.connect(bp);bp.connect(tg);tg.connect(lp);nz.connect(hb);hb.connect(ng);ng.connect(lp);lp.connect(g);g.connect(ctx.destination);
     const end=t+len+0.03;tn.start(t);fl.start(t);nz.start(t);tn.stop(end);fl.stop(end);nz.stop(end);}catch(e){}}
+  let jet=null;
+  function jetSound(level,near,muted,cockpit){if(!ctx||!n)return;try{
+    if(!jet){const nz=ctx.createBufferSource();nz.buffer=Radio.noise();nz.loop=true;nz.start();const bp=ctx.createBiquadFilter();bp.type='bandpass';bp.frequency.value=420;bp.Q.value=0.6;
+      const lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=5000;const ng=ctx.createGain();ng.gain.value=0;const wh=ctx.createOscillator();wh.type='sine';wh.frequency.value=2900;wh.start();
+      const wg=ctx.createGain();wg.gain.value=0;nz.connect(bp);bp.connect(ng);ng.connect(lp);wh.connect(wg);wg.connect(lp);lp.connect(ctx.destination);jet={bp,lp,ng,wg,wh};}
+    const k=muted||!opt.sfx?0:level*near;set(jet.ng.gain,0.11*k,0.4);set(jet.wg.gain,0.006*k*(0.4+0.6*near),0.4);set(jet.wh.frequency,2400+900*level,0.8);set(jet.bp.frequency,300+380*level,0.6);set(jet.lp.frequency,cockpit?1100:5200,0.2);}catch(e){}}
   function update(s,o){
     if(!opt.sfx){if(n)set(n.master.gain,0,0.05);return;}
     if(!n){if(o.muted)return;build();if(!n)return;}
@@ -2652,7 +2869,7 @@ const Sfx=(function(){let ctx=null,n=null,tdSeen=0,ntSeen=0,duck=1;
     // The nose wheel spins up too: a short, small chirp.
     if(s.ntN!==ntSeen){ntSeen=s.ntN;if(!o.muted&&s.gs>3){thump(0.1,140);if(s.gs>12)squeal(0.25,0,1900,o);}}
   }
-  return{update,sync(s){tdSeen=s.tdN;ntSeen=s.ntN;},off(){if(n)set(n.master.gain,0,0.05);},crash(){thump(0.5,130);chirp(1.6);}};})();
+  return{update,jet:jetSound,sync(s){tdSeen=s.tdN;ntSeen=s.ntN;},off(){if(n)set(n.master.gain,0,0.05);if(jet)jetSound(0,0,true,false);},crash(){thump(0.5,130);chirp(1.6);}};})();
 
 const sym=v=>v>=0.99?'<span class="ok">✓</span>':v>=0.5?'<span class="half">△</span>':'<span class="no">✗</span>';
 const SHORT={'Runway heading':'HDG','Crosswind turn started at':'TURN ALT','Heading':'HDG','Altitude rolling onto downwind':'ALT','Altitude':'ALT','Airspeed':'SPD','Centerline':'CL',
@@ -2985,7 +3202,7 @@ function closeOv(){ov.style.display='none';ovOpen=false;setCard('none');}
 function setCard(kind){if(bot.card===kind)return;bot.card=kind;botEmit('card',{kind});}
 // The trainer's own releases, newest first: player-friendly notes, and what each brought that is new to learn (features). Plain JSON between the markers:
 // Doodle's app reads them straight from this file (src/main/flightSim/releases.ts) to notice an update before he opens it.
-const SIM_RELEASES=/*SIM-RELEASES*/[{"version":"2.2","date":"2026-11-21","title":"A jet at Gate 1","notes":["A Coral Air 737 MAX is parked at Pinecrest's new Gate 1, with a jet bridge from the FBO to its front door.","A catering truck raises its box to the 737's back door, stays a while, and comes back down.","It all stands on the far side of the ramp, clear of your taxi route: have a look on your way out."],"features":[]},{"version":"2.1","date":"2026-11-21","title":"Paint shop and a busier ramp","notes":["Seven paint schemes for your SR22: pick one on the start card, or from the menu with PREV, NEXT and RANDOM.","The airplanes parked at the tie-downs are real SR22s now, each in its own paint.","Outside, the wheels roll and the rudder, elevators and prop move with you.","Your airplane always wears its own call sign, N427AS."],"features":["liveries"]},{"version":"2.0","date":"2026-11-21","title":"The real SR22","notes":["Your airplane is a real Cirrus SR22 from outside now, with flaps, ailerons, elevators, rudder, wheels and prop that all move.","Paint shop: pick from seven paint schemes on the start card, or keep the classic look.","Each scheme has its own registration and an SR20 or SR22 badge on the tail.","SR22 3D model by KOG_THORNS (CC BY 4.0)."],"features":["liveries"]},{"version":"1.1","date":"2026-11-18","title":"Weather and time of day","notes":["Overcast skies, and the hour of the day: dawn, sunset and night.","A real tyre squeal when the wheels touch down."],"features":["weather"]},{"version":"1.0","date":"2026-11-16","title":"First flight","notes":["Pinecrest, Ground and Tower, the pattern and the landing, all graded."],"features":[]}]/*END-SIM-RELEASES*/,SIM_VERSION=SIM_RELEASES[0].version;
+const SIM_RELEASES=/*SIM-RELEASES*/[{"version":"2.3","date":"2026-11-21","title":"Airliners come and go","notes":["The Coral Air 737 at Gate 1 is pushed back by a tug, taxis out and takes off; later another one lands and taxis in to the gate.","The 737 stands on real landing gear now, which folds up after takeoff and comes down on final.","Hear Tower and Ground talk to the airliners on their frequencies. Their calls are never for you, and never graded.","They are timed to stay out of your way, and an airliner goes around if the runway is not clear."],"features":[]},{"version":"2.2","date":"2026-11-21","title":"A jet at Gate 1","notes":["A Coral Air 737 MAX is parked at Pinecrest's new Gate 1, with a jet bridge from the FBO to its front door.","A catering truck raises its box to the 737's back door, stays a while, and comes back down.","It all stands on the far side of the ramp, clear of your taxi route: have a look on your way out."],"features":[]},{"version":"2.1","date":"2026-11-21","title":"Paint shop and a busier ramp","notes":["Seven paint schemes for your SR22: pick one on the start card, or from the menu with PREV, NEXT and RANDOM.","The airplanes parked at the tie-downs are real SR22s now, each in its own paint.","Outside, the wheels roll and the rudder, elevators and prop move with you.","Your airplane always wears its own call sign, N427AS."],"features":["liveries"]},{"version":"2.0","date":"2026-11-21","title":"The real SR22","notes":["Your airplane is a real Cirrus SR22 from outside now, with flaps, ailerons, elevators, rudder, wheels and prop that all move.","Paint shop: pick from seven paint schemes on the start card, or keep the classic look.","Each scheme has its own registration and an SR20 or SR22 badge on the tail.","SR22 3D model by KOG_THORNS (CC BY 4.0)."],"features":["liveries"]},{"version":"1.1","date":"2026-11-18","title":"Weather and time of day","notes":["Overcast skies, and the hour of the day: dawn, sunset and night.","A real tyre squeal when the wheels touch down."],"features":["weather"]},{"version":"1.0","date":"2026-11-16","title":"First flight","notes":["Pinecrest, Ground and Tower, the pattern and the landing, all graded."],"features":[]}]/*END-SIM-RELEASES*/,SIM_VERSION=SIM_RELEASES[0].version;
 function whatsNew(){const r=SIM_RELEASES[0];
   openOv('<div class="head"><div><h1>What’s new in '+esc(r.version)+'</h1><p>'+esc(r.title)+' · '+esc(r.date)+'</p></div><button class="go" id="wnBack">BACK ▸</button></div>'+
     '<ul class="wn">'+r.notes.map(n=>'<li>'+esc(n)+'</li>').join('')+'</ul>'+
@@ -3014,7 +3231,7 @@ function startCard(){
   '<p><b>Radio:</b> the strip at the top opens when a call is yours and folds away after you transmit. Tap it any time to fold it or bring it back. <b>ATIS · GND · TWR</b> tune the radio: you only hear, and are only heard on, the frequency you’re on.</p>'+
   '<p><b>Keyboard:</b> <kbd>S</kbd>/<kbd>W</kbd> pitch · <kbd>A</kbd> <kbd>D</kbd> bank/steer · <kbd>Z</kbd> <kbd>X</kbd> rudder · <kbd>[</kbd> <kbd>]</kbd> trim · <kbd>E</kbd> <kbd>Q</kbd> power · <kbd>F</kbd> <kbd>R</kbd> flaps · <kbd>B</kbd> brakes · <kbd>C</kbd> view · <kbd>G</kbd> menu · <kbd>T</kbd> radio · <kbd>P</kbd> pause</p>'+
   '<p><b>Gamepad:</b> left stick flies · triggers rudder · A/B power · LB/RB flaps · D-pad trim · X brakes · Y view · Start pause.</p></div></div>'+
-  '<p class="fine">Training toy, not a procedures trainer. Speeds and performance are approximations of the SR20 and SR22 — your POH, your school’s profile and your CFI win every argument. No other traffic is drawn; Tower just talks as if it’s there.</p>','start');
+  '<p class="fine">Training toy, not a procedures trainer. Speeds and performance are approximations of the SR20 and SR22 — your POH, your school’s profile and your CFI win every argument. Airliners come and go at Gate 1, timed to stay out of your way; you hear Tower and Ground talk to them, and nothing they say is graded.</p>','start');
   const pick=(sel,key,attr,save)=>{const mark=()=>ov.querySelectorAll(sel+' button').forEach(b=>b.classList.toggle('on',b.dataset[attr]===opt[key]));mark();
     ov.querySelectorAll(sel+' button').forEach(b=>b.addEventListener('click',()=>{opt[key]=b.dataset[attr];store.set(save,opt[key]);mark();lab();if(key==='ac'){C.setAircraft(opt.ac);G.setAircraft(opt.ac);}}));};
   const lab=()=>{$('fly').textContent=opt.mode==='final'?'START ON FINAL ▸':'START ON THE RAMP ▸';};
@@ -3029,7 +3246,7 @@ function launch(o){setBeg(o.beginner);opt.freeze=o.freeze;opt.coach=o.coach;opt.
 function begin(){C.setAircraft(opt.ac);G.setAircraft(opt.ac);s=C.newState(opt.mode!=='final');s.assist=opt.model==='assist';if(opt.mode==='final')C.onFinal(s,1.6);
   ses=C.Session(opt.mode,onEvent);log.innerHTML='';trail.length=0;prof=[];profs=[];lastCoach='';manualPause=false;$('bPause').classList.remove('on');kp=0;inp.pitch=inp.roll=inp.rud=0;
   document.body.classList.toggle('assist',s.assist);G.resetCam();G.setCoach(opt.coach);G.setPark(false);Sfx.sync(s);
-  tuned=ses.freq;unheard=false;lastTag='';setPin(false);setLive(false);radioIdle();G.setTaxi(null);G.orbitHome();started=true;closeOv();}
+  tuned=ses.freq;unheard=false;lastTag='';setPin(false);setLive(false);radioIdle();G.setTaxi(null);G.orbitHome();started=true;TQ.length=0;G.trafficReset(opt.mode);closeOv();}
 function retryLanding(){ses.retryFinal();C.onFinal(s,1.5);s.assist=opt.model==='assist';kp=0;inp.pitch=inp.roll=inp.rud=0;G.resetCam();Sfx.sync(s);trail.length=0;prof=[];started=true;closeOv();
   tuned=ses.freq;unheard=false;lastTag='';setLive(!!ses.pending);
   toast('<b>BACK ON FINAL</b>1.5 NM out, 80 kt, flaps 100%, trimmed. Cleared as before.',5000);}
@@ -3059,6 +3276,15 @@ function debrief(title,sub,resume,crash){
 
 /* ================= loop ================= */
 let last=performance.now(),frameN=0,slowT=0,slowN=0,creditOn='';const credit=$('credit');
+// the airliner traffic's view of the person's flight: where they are and what they are doing (free: no flight under way, or it is over)
+function trafficInfo(){if(!ses||!started||ses.ended||ses.parked||s.crashed)return{free:true};const rc=C.toRwy(s.x,s.z);
+  return{free:false,mode:ses.mode,phase:ses.phase,onGround:s.y<0.6,a:rc.a,c:rc.c,gs:s.gs/C.KT,lap:ses.lap,lastLap:ses.lastLap};}
+// Tower's and Ground's calls with the airliners: heard only on the frequency they are on, after anything of yours, never over it, never graded
+const TQ=[];let tqIdle=0;
+G.onTraffic=(fac,who,text)=>{TQ.push({fac,who,text,t:performance.now()});if(TQ.length>8)TQ.shift();botEmit('traffic',{facility:fac==='Ground'?'GND':'TWR',from:who==='PILOT'?'airliner':who,text});};
+function trafficRadio(){const now=performance.now(),fresh=ses&&ses.pending&&ses.simT-(ses.firedAt[ses.pending.it.id]||0)<8;if(Radio.busy()||fresh){tqIdle=now;return;}if(!TQ.length||now-tqIdle<1400)return;
+  const m=TQ.shift();if(now-m.t>40000||!started||ovOpen)return;if(tuned!==m.fac)return;
+  const tag=m.who==='PILOT'?'CORAL':m.fac==='Ground'?'GND':'TWR';say('atc oth'+(m.fac==='Ground'&&m.who!=='PILOT'?' gnd':'')+(m.who==='PILOT'?' plt':''),tag,esc(m.text));speak(m.text,m.who==='PILOT'?'PILOT':m.fac==='Ground'?'GND':'TWR');tqIdle=now+400;}
 function frame(now){
   const dt=Math.min(0.05,(now-last)/1000);last=now;frameN++;
   const paused=ovOpen||manualPause||(typing&&opt.freeze);
@@ -3067,6 +3293,9 @@ function frame(now){
     trailT+=dt;if(trailT>1.5){trailT=0;trail.push([s.x,s.z]);if(trail.length>700)trail.shift();}
     if(s.crashed){started=false;G.thump(1.6);Sfx.crash();ses.crash(s.crashed);debrief('Bent the airplane',s.crashed+' Everything up to that point is graded below.',false,s.crashed);}
   }
+  if(frameN%6===0)G.setTrafficInfo(trafficInfo());
+  trafficRadio();
+  {const j=G.trafficSound();Sfx.jet(j.level,j.near,!started||ovOpen||manualPause,G.cam==='cockpit');}
   if(ses&&frameN%20===0){G.setPark(opt.coach&&!ses.parked&&(ses.phase==='TAXI'||(ses.phase==='ROLLOUT'&&ses.clr.land==='land'&&s.gs<25)));G.setTaxi(taxiRoute());}
   hud();if(frameN%5===0)drawMap();
   if(frameN%15===0){const sr=G.modelShown&&!ovOpen,rp=G.rampInView&&!ovOpen,
@@ -3084,7 +3313,7 @@ function frame(now){
 /* ================= SimBot: the supported way for a program to fly (see SIMBOT.md) =================
    Built on the page's own state and its own code paths: START, transmit, tune, the cards. Nothing here changes how the airplane flies,
    how anything is graded or what ATC says. Until SimBot.enable() is called a person's controls are untouched. */
-const BOT_V=1.4,BOT_EV=['atc','prompt','graded','missed','phase','touchdown','bounce','landing','violation','shutdown','end','card','debrief','error','*'];
+const BOT_V=1.5,BOT_EV=['atc','prompt','graded','missed','phase','touchdown','bounce','landing','violation','shutdown','end','card','debrief','error','traffic','*'];
 // every kind of call the trainer's ATC can make, or ask of you (each 'intent' type, see SIMBOT.md): a bot can tell from hello() whether it knows them all
 const BOT_INTENTS=['taxi','holdShort','lineUpAndWait','clearedForTakeoff','clearedTouchAndGo','extendDownwind','clearedForOption','clearedToLand','goAround','makeTraffic','exitAndContact',
   'verify','checkAltitude','holdPosition','notCleared','warning','contact','requestTaxi','reportReady','reportFullStop','requestTaxiToRamp'];
@@ -3141,7 +3370,7 @@ function botState(o){
     phase:ses?ses.phase:null,
     session:ses?{mode:ses.mode,lap:ses.lap,circuit:ses.circ,lastLap:ses.lastLap,landings:ses.landings,ended:!!ses.ended,parked:!!ses.parked,
       landing:ses.ld?{done:!!ses.ld.done,rating:ses.ld.rating||null,bounces:ses.ld.bounces|0,sinkRate:ses.ld.td.sink,ias:ses.ld.td.ias,groundspeed:ses.ld.td.gs,pitch:ses.ld.td.pitch,a:ses.ld.td.a,c:ses.ld.td.c}:null}:null,
-    aircraft:opt.ac,livery:G.livery,exterior:G.modelReady?'ready':G.modelFailed?'failed':'loading',handling:opt.model,quality:G.quality,camera:G.cam,beginner:!!opt.beg,weather:G.weather,time:G.time,clock:G.timeLabel(G.time),
+    traffic:G.trafficState(),aircraft:opt.ac,livery:G.livery,exterior:G.modelReady?'ready':G.modelFailed?'failed':'loading',handling:opt.model,quality:G.quality,camera:G.cam,beginner:!!opt.beg,weather:G.weather,time:G.time,clock:G.timeLabel(G.time),
     radio:{tuned:FQ[tuned].tag,expected:ses?tagOf(ses.freq):null,frequencies:Object.keys(FQ).map(k=>({facility:FQ[k].tag,freq:FQ[k].n})),
       callsign:{registration:'N427AS',full:C.FULL,abbreviated:C.ABBR,abbreviatedOK:!!(ses&&ses.abbrevOK)},
       pending:p?{id:p.it.id,kind:p.it.kind==='pilot'?'call':'readback',facility:p.it.kind==='pilot'?tagOf(ses.freq):(p.it.from||'TWR'),
