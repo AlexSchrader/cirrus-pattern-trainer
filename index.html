@@ -1907,6 +1907,77 @@ frameHooks.push((s,dt,simDt,ckp)=>{
   if(P.rud)P.rud.rotation.z=PU.rud.rotation.x;
   const el=-PU.elev[0].rotation.x;if(P.eL)P.eL.rotation.y=el;if(P.eR)P.eR.rotation.y=el;});
 window.__mdl={MDL,plane,paintLivery};
+// ---- The airline gate at the FBO (models/, credited in CREDITS.md): a Coral Air 737 MAX 8 parked nose-in, a jet bridge on a fixed walkway from the FBO to its
+// front door, a catering truck at its back door raising its box to it and lowering it again. Scenery only: nothing here is taxied into, talked about or graded,
+// and it stands clear of every taxi route. Loaded after the sim is up; if it cannot load, the ramp is as it was.
+// Airfield metres (x across toward the ramp, a along the runway). The 737's doors, measured on the model: L1/R1 5.0 m behind the nose, L2/R2 31.8 m, sills 2.27 m.
+const RAMP={ready:false,failed:false,info:{},g:null,mixer:null,act:null,inView:false,hold:null,
+  jet:{nose:[274,707],len:39.52},                 // 737 MAX 8, 39.52 m long; centreline a 707, nose toward the FBO
+  rot:[269,722.85],                                 // jet bridge rotunda: 14.3 m straight out from L1 (269, 708.8), so its cab meets the door square on
+  truck:[242.1,700.05],                            // catering truck square to R2 (242.1, 705.2): raised, its platform reaches the skin; its cab stays 0.6 m clear
+  cyc:{down:45,up:160,lift:1,lower:1.3},phase:'up',pt:0};
+(function rampLoad(){
+  if(!THREE.GLTFLoader){RAMP.failed=true;return;}
+  const ld=new THREE.GLTFLoader(),get=n=>new Promise((ok,no)=>ld.load('models/'+n+'/web/scene.json',ok,undefined,no));
+  // a model at its real size, stood on the ground: scale k (or longest side len metres), the point `at` (model x,z) at the origin; `drop`: parts left out
+  const fit=(gl,o,key)=>{const sc=gl.scene;if(o.drop)sc.traverse(n=>{if(o.drop.test(n.name||''))n.visible=false;});sc.updateMatrixWorld(true);
+    const b=new THREE.Box3();sc.traverse(n=>{if(!n.isMesh)return;for(let q=n;q;q=q.parent)if(q.visible===false)return;b.expandByObject(n);});
+    const sz=b.getSize(new THREE.Vector3()),k=o.k||o.len/Math.max(sz.x,sz.z),c=o.at?new THREE.Vector3(o.at[0],0,o.at[1]):b.getCenter(new THREE.Vector3());
+    RAMP.info[key]={size:[sz.x,sz.y,sz.z].map(v=>+(v*k).toFixed(2)),k:+k.toFixed(4)};
+    const w=new THREE.Group();sc.position.set(-c.x,-b.min.y,-c.z);w.scale.setScalar(k);w.add(sc);
+    w.traverse(n=>{if(!n.isMesh)return;n.castShadow=n.receiveShadow=true;const m=n.material;if(m&&m.isMeshStandardMaterial&&!m.transparent)shadeStd(m);});fxAll(w);return w;};
+  // stand-in boxes for the projected shadows of the tiers without shadow maps: [w, h, d, x, y, z] in the group's own metres
+  const shadowsOf=(par,boxes)=>boxes.forEach(q=>{const o=new THREE.Object3D();o.geometry=new THREE.BoxGeometry(q[0],q[1],q[2]);o.position.set(q[3],q[4],q[5]);par.add(o);addPShadow(o);});
+  Promise.all([get('coral_air_737_max_8'),get('aerobridge'),get('airport_catering_truck')]).then(([jet,br,tr])=>{
+    const g=new THREE.Group();apt.add(g);RAMP.g=g;
+    const put=(obj,x,a,ry)=>{const h=new THREE.Group();h.position.set(x,0,zOf(a));h.rotation.y=ry||0;if(obj)h.add(obj);g.add(h);return h;};
+    // the 737: its nose is model +z, turned to +x; fitted about its middle, half a length behind the nose
+    const J=RAMP.jet,jg=RAMP.jetG=put(fit(jet,{len:J.len},'jet'),J.nose[0]-J.len/2,J.nose[1],PI/2);
+    shadowsOf(jg,[[3.7,3.6,38,0,2.6,0],[34,0.35,4.5,0,1.9,-1.5],[14,0.3,3,0,4.6,-16.5],[0.3,6,4,0,8,-17.5]]);
+    // the jet bridge: its rotunda (model x -2.4) at the origin, pointing -a (model +x) at the door; its ground plate left out
+    const bg=RAMP.bridgeG=put(fit(br,{k:3,drop:/^Plane\.?003/,at:[-2.4,0]},'bridge'),RAMP.rot[0],RAMP.rot[1],-PI/2);
+    shadowsOf(bg,[[14,2.7,2,7,4.6,0],[1.2,3.3,1.2,0,1.6,0]]);
+    // the fixed walkway from the rotunda to the FBO's glass front (x 300), at the rotunda's floor (3.27 m), on two columns, GATE 1 on its sides
+    {const x0=RAMP.rot[0]+1.15,x1=300,L2=x1-x0,mid=(x0+x1)/2,fl=3.27,H3=2.75,W3=2.7,lg=put(null,mid,RAMP.rot[1],0);
+      const shell=SM(0xe9ecee,0.55,0.15),band=new THREE.MeshStandardMaterial({color:lin(0x14212b),roughness:0.08,metalness:0.7,envMapIntensity:1.2,emissive:0xffd9a0,emissiveIntensity:0}),con=SM(0xb9b4aa,0.9,0);
+      NIGHT_MATS.push([band,0,0.22]);   // (its windows lit from inside at night, like the FBO's)
+      const P=(geo,mat,x,y,z)=>{const m=new THREE.Mesh(geo,mat);m.position.set(x,y,z);m.castShadow=m.receiveShadow=true;lg.add(m);return m;};
+      P(new THREE.BoxGeometry(L2,0.45,W3),shell,0,fl-0.22,0);P(new THREE.BoxGeometry(L2,0.3,W3+0.1),shell,0,fl+H3+0.15,0);              // floor slab, roof
+      [-1,1].forEach(sd=>{P(new THREE.BoxGeometry(L2,0.75,0.12),shell,0,fl+0.37,sd*W3/2);P(new THREE.BoxGeometry(L2,0.5,0.12),shell,0,fl+H3-0.25,sd*W3/2);   // wall below and above the windows
+        P(new THREE.BoxGeometry(L2,H3-1.25,0.06),band,0,fl+0.75+(H3-1.25)/2,sd*(W3/2-0.03));
+        for(let x=-L2/2+1.5;x<L2/2;x+=3)P(new THREE.BoxGeometry(0.14,H3-1.25,0.16),shell,x,fl+0.75+(H3-1.25)/2,sd*W3/2);});                // window mullions
+      [-L2*0.18,L2*0.3].forEach(x=>{P(new THREE.BoxGeometry(0.7,fl-0.45,0.7),con,x,(fl-0.45)/2,0);P(new THREE.BoxGeometry(1.4,0.25,1.4),con,x,0.12,0);});   // columns on their footings
+      const sc=cv(256,128),sg=sc.getContext('2d');sg.fillStyle='#17324d';sg.fillRect(0,0,256,128);sg.fillStyle='#fff';sg.font='700 64px Arial,Helvetica,sans-serif';sg.textAlign='center';sg.textBaseline='middle';sg.fillText('GATE 1',128,68);
+      const st=ctex(sc),sm=new THREE.MeshStandardMaterial({map:st,emissiveMap:st,emissive:0xffffff,emissiveIntensity:0.1,roughness:0.6});NIGHT_MATS.push([sm,0.1,1.1]);
+      // the sign board stands on the roof, its face on both sides
+      P(new THREE.BoxGeometry(2.6,1.4,0.3),SM(0x2a3138,0.6,0.3),-L2/2+4,fl+H3+1.0,0);
+      [[-1,PI],[1,0]].forEach(q=>{const m=new THREE.Mesh(new THREE.PlaneGeometry(2.4,1.2),sm);m.position.set(-L2/2+4,fl+H3+1.0,q[0]*0.16);m.rotation.y=q[1];lg.add(m);});
+      shadowsOf(lg,[[L2,H3+0.6,W3,0,fl+H3/2,0],[0.7,fl,0.7,-L2*0.18,fl/2,0],[0.7,fl,0.7,L2*0.3,fl/2,0]]);
+      fxAll(lg);}
+    // the catering truck: its front (model -z) toward the fuselage (+a)
+    const tg=RAMP.truckG=put(fit(tr,{k:1},'truck'),RAMP.truck[0],RAMP.truck[1],0);
+    shadowsOf(tg,[[2.4,2.4,8.6,0,1.4,0]]);
+    // cones at the wingtips and the tail, as a ground crew sets them out
+    {const cg=new THREE.ConeGeometry(0.17,0.72,12).translate(0,0.36,0),om=SM(0xff6a13,0.6,0),bm=new THREE.Mesh(new THREE.BoxGeometry(0.42,0.04,0.42),SM(0x1d1f22,0.9,0));
+      [[J.nose[0]-27.7,J.nose[1]+19.6],[J.nose[0]-27.7,J.nose[1]-19.6],[J.nose[0]-41.6,J.nose[1]]].forEach(q=>{const c=put(new THREE.Mesh(cg,om),q[0],q[1],0);c.children[0].castShadow=true;const b2=bm.clone();b2.position.y=0.02;c.add(b2);
+        const ring=new THREE.Mesh(new THREE.CylinderGeometry(0.105,0.13,0.12,12),SM(0xf2f2f2,0.5,0));ring.position.y=0.42;c.add(ring);fxAll(c);});}
+    if(tr.animations&&tr.animations.length){RAMP.mixer=new THREE.AnimationMixer(tr.scene);const A=RAMP.act=RAMP.mixer.clipAction(tr.animations[0]);A.setLoop(THREE.LoopOnce,1);A.clampWhenFinished=true;A.play();
+      RAMP.info.clip=+tr.animations[0].duration.toFixed(1);RAMP.pt=Math.random()*RAMP.cyc.up;RAMP.mixer.update(0);}
+    RAMP.ready=true;
+  }).catch(e=>{RAMP.failed=true;console.warn('Airline gate models not loaded; the ramp stays as it was',e&&e.message);});})();
+// the truck's day: down, its box up to the door (the model's own 84 s lift), a while there, down again; and is the gate in view (for the credit line)
+{const fr=new THREE.Frustum(),pm=new THREE.Matrix4(),sph=new THREE.Sphere(new THREE.Vector3(),40);let n=0,last=-1;
+  frameHooks.push((s,dt)=>{if(!RAMP.ready)return;
+    if(RAMP.act){const C=RAMP.cyc,A=RAMP.act,D=A.getClip().duration-0.01;let t;RAMP.pt+=dt;
+      if(RAMP.hold!=null)t=Math.min(D,RAMP.hold);
+      else if(RAMP.phase==='down'){t=0;if(RAMP.pt>C.down){RAMP.phase='lift';RAMP.pt=0;}}
+      else if(RAMP.phase==='lift'){t=Math.min(D,RAMP.pt*C.lift);if(t>=D){RAMP.phase='up';RAMP.pt=0;}}
+      else if(RAMP.phase==='up'){t=D;if(RAMP.pt>C.up){RAMP.phase='lower';RAMP.pt=0;}}
+      else{t=Math.max(0,D-RAMP.pt*C.lower);if(t<=0){RAMP.phase='down';RAMP.pt=0;}}
+      if(Math.abs(t-last)>1e-4){A.time=t;RAMP.mixer.update(0);last=t;}}
+    if((n++%10)===0){sph.center.set(258,3,zOf(712));apt.localToWorld(sph.center);pm.multiplyMatrices(cam.projectionMatrix,cam.matrixWorldInverse);fr.setFromProjectionMatrix(pm);
+      RAMP.inView=fr.intersectsSphere(sph)&&cam.position.distanceTo(sph.center)<3000;}});}
+window.__ramp=RAMP;
 /* ---------- cabin: Perspective Touch+ style flight deck (two wide displays, twin touch controllers, side yokes, single power lever) ---------- */
 const EYE=new THREE.Vector3(-0.31,0.6,-0.3),INT={};
 const pfdC=cv(768,480),pg=pfdC.getContext('2d'),pfdTex=new THREE.CanvasTexture(pfdC),mfdC=cv(768,480),mg2=mfdC.getContext('2d'),mfdTex=new THREE.CanvasTexture(mfdC);
@@ -2305,7 +2376,7 @@ function setQuality(name){if(!QUAL[name])return;qName=name;q=QUAL[name];
   parked.forEach(p=>{p.visible=q.parked;});qualHooks.forEach(f=>f(q,name));applySize();applyTime(true);}
 function resize(w,h){W=w;H=h;portrait=w<h;applySize();}
 /* ---------- cameras ---------- */
-const CAMS=['chase','cockpit','tower'];let camMode='chase',camInit=false,camHdg=0;const camP=new THREE.Vector3(),v3=new THREE.Vector3(),v3b=new THREE.Vector3();
+const CAMS=['chase','cockpit','tower'];let camMode='chase',camInit=false,camHdg=0,peekCam=null;const camP=new THREE.Vector3(),v3=new THREE.Vector3(),v3b=new THREE.Vector3();
 function nextCam(){camMode=CAMS[(CAMS.indexOf(camMode)+1)%3];camInit=false;ckZ=1;return camMode;}
 function resetCam(){camInit=false;orbY=orbP=0;}
 let T=0,propAng=0,discAng=0,pfdN=0,fl=1,ail=0,elv=0,rud=0,tdSeen=0,thump=0,cabLayer=false,lookY=0,lookP=0,lookHeld=false,lookIdle=9,orbY=0,orbP=0,orbHeld=false,orbIdle=9,zoomK=1,ckZ=1;const hb={on:0,x:0,y:0,z:0,vx:0,vy:0,vz:0,pvy:0,pv:0};
@@ -2384,6 +2455,7 @@ function frame(s,inp,dt,paused){
       hb.vy+=(-72*hb.y-11*hb.vy-ay*0.1)*simDt;hb.y=clamp(hb.y+hb.vy*simDt,-0.04,0.03);hb.vz+=(-60*hb.z-10*hb.vz+ax*0.16)*simDt;hb.z=clamp(hb.z+hb.vz*simDt,-0.04,0.04);hb.vx+=(-60*hb.x-10*hb.vx+al*0.1)*simDt;hb.x=clamp(hb.x+hb.vx*simDt,-0.03,0.03);}
     cam.position.set(EYE.x+hb.x+0.0012*Math.sin(T*0.83),EYE.y+hb.y+0.0016*Math.sin(T*1.31),EYE.z+hb.z).applyMatrix4(plane.matrixWorld);cam.quaternion.copy(plane.quaternion);cam.rotateY(lookY);cam.rotateX(lookP-(portrait?0.14:0.085));fov=2*Math.atan(Math.tan(baseFov*D2R/2)/ckZ)/D2R;
     if(pfdN%12===1)drawMFD(s);}
+  else if(peekCam){cam.position.copy(peekCam.p);cam.up.set(0,1,0);cam.lookAt(peekCam.t);fov=peekCam.fov;camInit=true;}
   else{cam.position.copy(twrPos);cam.up.set(0,1,0);v3.set(s.x,s.y+1,s.z);cam.lookAt(v3);const dist=cam.position.distanceTo(v3);fov=clamp(2*Math.atan(24/dist)/D2R,1.2,58);camInit=true;}
   if(camMode!=='tower'){const kq=ckp?0.6:1;cam.rotateX(shx*kq);cam.rotateY(shy*0.7*kq);}
   if(Math.abs(cam.fov-fov)>0.02||cam.near!==near){cam.fov=fov;cam.near=near;cam.updateProjectionMatrix();}
@@ -2398,10 +2470,12 @@ function frame(s,inp,dt,paused){
 }
 fx(taxiMat);setQuality('med');
 function setAircraft(k){const sr22=k==='sr22';buildPath(sr22?'sr22':'sr20');paintAcc.color.copy(lin(sr22?0x7d1420:0x163e7a));paintAcc2.color.copy(lin(sr22?0x2b2e33:0x8f9aa6));drawReg(sr22?'SR22':'SR20');mdlSetAc(k);}
-return{towerPos:twrPos,setAircraft,setLivery:mdlSetLivery,liveries:LIVERIES,get modelReady(){return MDL.ready;},get modelFailed(){return MDL.failed;},get livery(){return MDL.livery;},get modelShown(){return MDL.ready&&MDL.on===true;},setTrail(t){trailRef=t;},setCoach(on){guide.visible=!!on;},setPark(on){parkM.visible=!!on;},setTaxi,pfdCanvas:pfdC,thump(v){thump=Math.max(thump,v);},look(dx,dy){if(camMode==='cockpit'){lookHeld=true;lookIdle=0;lookY=clamp(lookY-dx*0.0045/ckZ,-2.3,2.3);lookP=clamp(lookP-dy*0.0045/ckZ,-0.9,1.1);}
+return{towerPos:twrPos,setAircraft,setLivery:mdlSetLivery,liveries:LIVERIES,get modelReady(){return MDL.ready;},get modelFailed(){return MDL.failed;},get livery(){return MDL.livery;},get modelShown(){return MDL.ready&&MDL.on===true;},get rampInView(){return RAMP.ready&&RAMP.inView;},setTrail(t){trailRef=t;},setCoach(on){guide.visible=!!on;},setPark(on){parkM.visible=!!on;},setTaxi,pfdCanvas:pfdC,thump(v){thump=Math.max(thump,v);},look(dx,dy){if(camMode==='cockpit'){lookHeld=true;lookIdle=0;lookY=clamp(lookY-dx*0.0045/ckZ,-2.3,2.3);lookP=clamp(lookP-dy*0.0045/ckZ,-0.9,1.1);}
     else if(camMode==='chase'){orbHeld=true;orbIdle=0;orbY+=dx*0.0062;if(orbY>PI)orbY-=PI*2;if(orbY<-PI)orbY+=PI*2;orbP=clamp(orbP+dy*0.0045,-0.38,1.1);}},
   lookEnd(){lookHeld=false;lookIdle=0;orbHeld=false;orbIdle=0;},zoom(f){if(camMode==='cockpit')ckZ=clamp(ckZ/f,1,3);else zoomK=clamp(zoomK*f,0.5,3.2);},orbitHome(){orbY=orbP=0;zoomK=1;ckZ=1;lookY=lookP=0;},setWeather(n){if(!WX[n]||n===wx)return;wx=n;applyTime(true);},get weather(){return wx;},WX,QUAL,layout:LAYOUT,_tex:texPNG,
-  frame,resize,setQuality,nextCam,resetCam,setCam(m){camMode=m;camInit=false;},setTime(t){tod=t;applyTime(false);},get quality(){return qName;},get cam(){return camMode;},get time(){return tod;},hasPost:HAS_POST,
+  frame,resize,setQuality,nextCam,resetCam,setCam(m){camMode=m;camInit=false;peekCam=null;},
+  // (for the picture tools only: a fixed camera at airfield [x,y,a] looking at [x,y,a]; null gives the tower's back)
+  peek(p,t,f){if(!p){peekCam=null;return;}camMode='tower';const w=(q)=>apt.localToWorld(new THREE.Vector3(q[0],q[1],zOf(q[2])));peekCam={p:w(p),t:w(t),fov:f||45};},setTime(t){tod=t;applyTime(false);},get quality(){return qName;},get cam(){return camMode;},get time(){return tod;},hasPost:HAS_POST,
   timeLabel(t){const hh=Math.floor(t),mm=Math.round((t-hh)*60);return(hh<10?'0':'')+hh+':'+(mm<10?'0':'')+mm;},renderer:R};
 }
 </script>
@@ -2911,7 +2985,7 @@ function closeOv(){ov.style.display='none';ovOpen=false;setCard('none');}
 function setCard(kind){if(bot.card===kind)return;bot.card=kind;botEmit('card',{kind});}
 // The trainer's own releases, newest first: player-friendly notes, and what each brought that is new to learn (features). Plain JSON between the markers:
 // Doodle's app reads them straight from this file (src/main/flightSim/releases.ts) to notice an update before he opens it.
-const SIM_RELEASES=/*SIM-RELEASES*/[{"version":"2.1","date":"2026-11-21","title":"Paint shop and a busier ramp","notes":["Seven paint schemes for your SR22: pick one on the start card, or from the menu with PREV, NEXT and RANDOM.","The airplanes parked at the tie-downs are real SR22s now, each in its own paint.","Outside, the wheels roll and the rudder, elevators and prop move with you.","Your airplane always wears its own call sign, N427AS."],"features":["liveries"]},{"version":"2.0","date":"2026-11-21","title":"The real SR22","notes":["Your airplane is a real Cirrus SR22 from outside now, with flaps, ailerons, elevators, rudder, wheels and prop that all move.","Paint shop: pick from seven paint schemes on the start card, or keep the classic look.","Each scheme has its own registration and an SR20 or SR22 badge on the tail.","SR22 3D model by KOG_THORNS (CC BY 4.0)."],"features":["liveries"]},{"version":"1.1","date":"2026-11-18","title":"Weather and time of day","notes":["Overcast skies, and the hour of the day: dawn, sunset and night.","A real tyre squeal when the wheels touch down."],"features":["weather"]},{"version":"1.0","date":"2026-11-16","title":"First flight","notes":["Pinecrest, Ground and Tower, the pattern and the landing, all graded."],"features":[]}]/*END-SIM-RELEASES*/,SIM_VERSION=SIM_RELEASES[0].version;
+const SIM_RELEASES=/*SIM-RELEASES*/[{"version":"2.2","date":"2026-11-21","title":"A jet at Gate 1","notes":["A Coral Air 737 MAX is parked at Pinecrest's new Gate 1, with a jet bridge from the FBO to its front door.","A catering truck raises its box to the 737's back door, stays a while, and comes back down.","It all stands on the far side of the ramp, clear of your taxi route: have a look on your way out."],"features":[]},{"version":"2.1","date":"2026-11-21","title":"Paint shop and a busier ramp","notes":["Seven paint schemes for your SR22: pick one on the start card, or from the menu with PREV, NEXT and RANDOM.","The airplanes parked at the tie-downs are real SR22s now, each in its own paint.","Outside, the wheels roll and the rudder, elevators and prop move with you.","Your airplane always wears its own call sign, N427AS."],"features":["liveries"]},{"version":"2.0","date":"2026-11-21","title":"The real SR22","notes":["Your airplane is a real Cirrus SR22 from outside now, with flaps, ailerons, elevators, rudder, wheels and prop that all move.","Paint shop: pick from seven paint schemes on the start card, or keep the classic look.","Each scheme has its own registration and an SR20 or SR22 badge on the tail.","SR22 3D model by KOG_THORNS (CC BY 4.0)."],"features":["liveries"]},{"version":"1.1","date":"2026-11-18","title":"Weather and time of day","notes":["Overcast skies, and the hour of the day: dawn, sunset and night.","A real tyre squeal when the wheels touch down."],"features":["weather"]},{"version":"1.0","date":"2026-11-16","title":"First flight","notes":["Pinecrest, Ground and Tower, the pattern and the landing, all graded."],"features":[]}]/*END-SIM-RELEASES*/,SIM_VERSION=SIM_RELEASES[0].version;
 function whatsNew(){const r=SIM_RELEASES[0];
   openOv('<div class="head"><div><h1>What’s new in '+esc(r.version)+'</h1><p>'+esc(r.title)+' · '+esc(r.date)+'</p></div><button class="go" id="wnBack">BACK ▸</button></div>'+
     '<ul class="wn">'+r.notes.map(n=>'<li>'+esc(n)+'</li>').join('')+'</ul>'+
@@ -2984,7 +3058,7 @@ function debrief(title,sub,resume,crash){
 }
 
 /* ================= loop ================= */
-let last=performance.now(),frameN=0,slowT=0,slowN=0,creditOn=false;const credit=$('credit');
+let last=performance.now(),frameN=0,slowT=0,slowN=0,creditOn='';const credit=$('credit');
 function frame(now){
   const dt=Math.min(0.05,(now-last)/1000);last=now;frameN++;
   const paused=ovOpen||manualPause||(typing&&opt.freeze);
@@ -2995,7 +3069,9 @@ function frame(now){
   }
   if(ses&&frameN%20===0){G.setPark(opt.coach&&!ses.parked&&(ses.phase==='TAXI'||(ses.phase==='ROLLOUT'&&ses.clr.land==='land'&&s.gs<25)));G.setTaxi(taxiRoute());}
   hud();if(frameN%5===0)drawMap();
-  if(frameN%15===0){const on=G.modelShown&&!ovOpen;if(on!==creditOn){creditOn=on;credit.style.display=on?'block':'none';}}
+  if(frameN%15===0){const sr=G.modelShown&&!ovOpen,rp=G.rampInView&&!ovOpen,
+      txt=sr&&rp?'3D models: KOG_THORNS · Dave Love · killer456 · spot1studios (CC BY 4.0), modified':sr?'SR22 3D model: KOG_THORNS (CC BY 4.0), repainted':rp?'3D models: Dave Love · killer456 · spot1studios (CC BY 4.0), modified':'';
+    if(txt!==creditOn){creditOn=txt;if(txt)credit.textContent=txt;credit.style.display=txt?'block':'none';}}
   if(!ovOpen||frameN<8)G.frame(s,inp,dt,paused||!started);   // nothing to draw behind a full-screen card (the first frames still run so shaders compile while you read)
   {let dist=1,near=1,dop=1;if(G.cam==='tower'){const tw=G.towerPos,dx=s.x-tw.x,dy=s.y-tw.y,dzz=s.z-tw.z,d=Math.max(30,Math.hypot(dx,dy,dzz)),h=C.hv(s.psi/D2R),vr=-(h.x*dx+h.z*dzz)/d*s.gs;dist=C.clamp(170/d,0.04,1);near=C.clamp(60/d,0,1);dop=1+C.clamp(vr,-90,90)/340;}
     Sfx.update(s,{cockpit:G.cam==='cockpit',muted:!started||ovOpen||manualPause||!!s.crashed,typing:typing&&opt.freeze,dist,near,dop});}
