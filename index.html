@@ -403,6 +403,7 @@ const DW=['zero','one','two','three','four','five','six','seven','eight','niner'
 const capW=t=>t.replace(/\b[a-z]/g,ch=>ch.toUpperCase()),p3=h=>String((Math.round(h)%360+360)%360||360).padStart(3,'0'),numT=v=>String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g,',');
 const fqW=f=>String(f).split('.').map(digW).join(' point ');
 const RWO=String((+RWY+17)%36+1),RWl=digW(RWY),RWU=capW(RWl),RWRE=new RegExp('\\brunway '+(RWY.length<2?'0?':'')+RWY+'\\b');
+const ONES=['zero','one','two','three','four','five','six','seven','eight','nine'],TPAW=(h=>{const t=Math.floor(h/1000),c=Math.round((h-t*1000)/100);return(t?ONES[t]+' thousand':'')+(c?(t?' ':'')+ONES[c]+' hundred':'');})(Math.round(AP.tpa/100)*100);
 const HDG3=p3(AP.hdg),WINDT=p3(AP.windFrom)+' at '+AP.windKt,WINDW=digW(p3(AP.windFrom))+' at '+digW(AP.windKt),TPAT=numT(AP.tpa),GNDW=fqW(AP.freq.Ground);
 const GNDRE=(([i,d])=>new RegExp('('+i+' )?point '+d+'\\b|\\b'+i+d+'\\b|\\b'+i.slice(1)+' '+d+'\\b'))(AP.freq.Ground.split('.'));
 const W={RWO,RWl,RWU,HDG3,WINDT,WINDW,TPAT,GNDW,digW,capW,p3,numT,fqW};
@@ -614,39 +615,39 @@ function Session(mode,emit){
       else if(s.onGround&&s.gs<3&&phaseT>4&&s.thr<0.3)setPhase('LINEUP');break;
     case 'UPWIND':
       if(s.justLanded&&s.lastTD.maxAgl<60){s.justLanded=false;setPhase('ROLL');break;}
-      if(onLeg&&agl>50){seg.h+=angDiff(hdg,30)*dt;seg.hn+=dt;}
+      if(onLeg&&agl>50){seg.h+=angDiff(hdg,AP.legs.UPWIND)*dt;seg.hn+=dt;}
       if(xwAlt==null&&s.phi<-8*D2R&&agl>100)xwAlt=alt;
-      if(angDiff(hdg,300)<35&&agl>100){
+      if(angDiff(hdg,AP.legs.CROSSWIND)<35&&agl>100){
         if(seg.hn>2)item('Upwind','Runway heading','±'+(seg.h/seg.hn).toFixed(0)+'°',HDG3+'° ±10',sc(seg.h/seg.hn,10));
         const xa=Math.round((xwAlt==null?alt:xwAlt)/10)*10;
         item('Upwind','Crosswind turn started at',xa.toLocaleString()+' ft','≥ 1,000 ft (within 300 of TPA)',xa>=990?1:clamp((xa-700)/300,0,1));
         legDone('Upwind',n0);setPhase('CROSSWIND');}
       break;
     case 'CROSSWIND':
-      if(onLeg){seg.h+=angDiff(hdg,300)*dt;seg.hn+=dt;}
-      if(angDiff(hdg,210)<35){
-        if(seg.hn>2)item('Crosswind','Heading','±'+(seg.h/seg.hn).toFixed(0)+'°','300° ±10',sc(seg.h/seg.hn,10));
+      if(onLeg){seg.h+=angDiff(hdg,AP.legs.CROSSWIND)*dt;seg.hn+=dt;}
+      if(angDiff(hdg,AP.legs.DOWNWIND)<35){
+        if(seg.hn>2)item('Crosswind','Heading','±'+(seg.h/seg.hn).toFixed(0)+'°',p3(AP.legs.CROSSWIND)+'° ±10',sc(seg.h/seg.hn,10));
         item('Crosswind','Altitude rolling onto downwind',(Math.round(alt/10)*10).toLocaleString()+' ft',TPAT+' ft ±100',sc(Math.abs(alt-AP.tpa),100));
         legDone('Crosswind',n0);nagged=false;altNag=0;setPhase('DOWNWIND');}
       break;
     case 'DOWNWIND':
-      if(onLeg){seg.h+=angDiff(hdg,210)*dt;seg.hn+=dt;seg.c+=rc.c*dt;seg.cn+=dt;
+      if(onLeg){seg.h+=angDiff(hdg,AP.legs.DOWNWIND)*dt;seg.hn+=dt;seg.c+=rc.c*dt;seg.cn+=dt;
         if(phaseT>8&&rc.a>0){seg.v+=Math.abs(ias-100)*dt;seg.vm+=ias*dt;seg.vn+=dt;}
         if(phaseT>5&&rc.a>0){seg.a+=Math.abs(alt-AP.tpa)*dt;seg.am+=alt*dt;seg.an+=dt;}}
       if(rc.a>0&&Math.abs(alt-AP.tpa)>200)altNag+=dt;else altNag=0;
-      if(altNag>6&&!nagged){nagged=true;emit('atc',{text:ABBR+', check altitude. Pattern altitude is one thousand three hundred.',advisory:true,from:'TWR',intent:{type:'checkAltitude',altitude:AP.tpa}});}
-      if(angDiff(hdg,120)<35&&rc.a<700){
+      if(altNag>6&&!nagged){nagged=true;emit('atc',{text:ABBR+', check altitude. Pattern altitude is '+TPAW+'.',advisory:true,from:'TWR',intent:{type:'checkAltitude',altitude:AP.tpa}});}
+      if(angDiff(hdg,AP.legs.BASE)<35&&rc.a<700){
         if(S.clr.extend)viol('Turned base before Tower called it — you were told to extend downwind.',ABBR+', I said extend downwind. Continue, I’ll call your base.',{type:'extendDownwind',willCallBase:true,reminder:true});
         if(seg.an>3)item('Downwind','Altitude',Math.round(seg.am/seg.an/10)*10+' ft avg, ±'+Math.round(seg.a/seg.an),TPAT+' ft ±100',sc(seg.a/seg.an,100),2);
-        if(seg.hn>3)item('Downwind','Heading','±'+(seg.h/seg.hn).toFixed(0)+'°','210° ±10',sc(seg.h/seg.hn,10));
+        if(seg.hn>3)item('Downwind','Heading','±'+(seg.h/seg.hn).toFixed(0)+'°',p3(AP.legs.DOWNWIND)+'° ±10',sc(seg.h/seg.hn,10));
         if(seg.vn>3)item('Downwind','Airspeed',Math.round(seg.vm/seg.vn)+' kt avg','100 kt ±10',sc(seg.v/seg.vn,10));
         if(seg.cn>3)item('Downwind','Spacing from runway',(seg.c/seg.cn/NM).toFixed(2)+' NM','about 1 NM',1,0);
         legDone('Downwind',n0);setPhase('BASE');}
       break;
     case 'BASE':
-      if(onLeg){seg.h+=angDiff(hdg,120)*dt;seg.hn+=dt;seg.v+=Math.abs(ias-90)*dt;seg.vm+=ias*dt;seg.vn+=dt;}
-      if(angDiff(hdg,30)<35){
-        if(seg.hn>2)item('Base','Heading','±'+(seg.h/seg.hn).toFixed(0)+'°','120° ±15',sc(seg.h/seg.hn,15));
+      if(onLeg){seg.h+=angDiff(hdg,AP.legs.BASE)*dt;seg.hn+=dt;seg.v+=Math.abs(ias-90)*dt;seg.vm+=ias*dt;seg.vn+=dt;}
+      if(angDiff(hdg,AP.legs.FINAL)<35){
+        if(seg.hn>2)item('Base','Heading','±'+(seg.h/seg.hn).toFixed(0)+'°',p3(AP.legs.BASE)+'° ±15',sc(seg.h/seg.hn,15));
         if(seg.vn>2)item('Base','Airspeed',Math.round(seg.vm/seg.vn)+' kt avg','90 kt ±10',sc(seg.v/seg.vn,10));
         const fl=Math.max(0,-rc.a)/NM;item('Base','Final approach length',fl.toFixed(1)+' NM at '+Math.round(agl/10)*10+' ft AGL','¾ NM or more',fl>=0.75?1:clamp(fl/0.75,0,1));
         legDone('Base',n0);setPhase('FINAL');}
