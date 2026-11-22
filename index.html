@@ -2182,7 +2182,7 @@ const TR={st:'park',t:0,P:{free:true},M:null,M2:null,tug:null,tugM:null,flt:null
     TR.lvl=!jg.visible?0:TR.st==='depart'&&jg.position.y<400?1:TR.st==='goaround'?0.95:TR.st==='arrive'&&TR.M&&poseOf(TR.M).y<=0.05&&TR.M.v>25?0.85:eng?(TR.st==='arrive'?0.45:0.3):0;
     lights(eng,rwy,ldg);};
   // where the airliner is (for SimBot.state().traffic) and how loud it is where the camera is
-  TR.state=()=>{if(!RAMP.ready||!RAMP.jetG||!RAMP.jetG.visible||!TR.flt||TR.st==='park')return[];   // (nothing before a flight has started, or while it stands at the gate)const jg=RAMP.jetG,a=L/2-jg.position.z,x=jg.position.x;
+  TR.state=()=>{if(!RAMP.ready||!RAMP.jetG||!RAMP.jetG.visible||!TR.flt||TR.st==='park')return[];   /* (nothing before a flight has started, or while it stands at the gate) */const jg=RAMP.jetG,a=L/2-jg.position.z,x=jg.position.x;
     return[{callsign:'Coral '+TR.flt[0],type:'B38M',state:TR.st,x:+x.toFixed(1),a:+a.toFixed(1),c:+(-x).toFixed(1),altFt:Math.round(jg.position.y/C.FT),gsKt:TR.M?Math.round(TR.M.v/C.KT):0,heading:Math.round(((120-Math.atan2(-Math.cos(jg.rotation.y),Math.sin(jg.rotation.y))/D2R)%360+360)%360)}];};
   TR.sound=()=>{if(!RAMP.ready||!TR.lvl)return{level:0,near:0};const p=new THREE.Vector3();RAMP.jetG.getWorldPosition(p);const d=Math.max(20,p.distanceTo(cam.position));return{level:TR.lvl,near:Math.min(1,Math.pow(120/d,1.25))};};
   frameHooks.push((s,dt,simDt)=>{if(RAMP.ready&&!TR.tug){TR.tug=buildTug();apt.add(TR.tug);place(TR.tug,{x:TUG_HOME.x,a:TUG_HOME.a,yaw:PI/2});lightsOn(RAMP.jetB.children[0]);if(!TR.flt)TR.reset(TR.mode||'quick');}
