@@ -9,7 +9,7 @@ graded. Works on a PC (keyboard, mouse, gamepad) and on a phone (touch; turn it 
 Training toy, not a procedures trainer: speeds and performance are approximations; your POH, your
 school's profile and your CFI win every argument.
 
-Release 2.5. Bots fly it through `window.SimBot` (version 1.7).
+Release 2.6. Bots fly it through `window.SimBot` (version 1.8).
 
 This repo is published from the sim's one source copy; changes made here are overwritten on the next
 publish. 3D model credits: [CREDITS.md](CREDITS.md).
