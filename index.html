@@ -1848,6 +1848,36 @@ function mdlSplit(mesh){
     else if(n>=380&&n<=410&&c.mx[0]<-6.2&&c.mx[2]>3.8)k='rud';
     else if(n>=20&&n<=28&&c.mx[0]<-5.3&&c.mn[0]>-6.6&&c.mx[2]<2.1&&c.mn[2]>1.7&&Math.abs(cy)>0.8)k=cy>0?'eL':'eR';
     if(k&&!pick[k]){pick[k]=c;c.tris.forEach(t=>used.add(t));}});
+  // The flaps and ailerons, cut out of each wing along its hinge line (76% of the chord: a row of the model's own vertices), the flap from the root to a
+  // little past half the span, the aileron from there nearly to the tip (model units: x forward, y to the left, z up), each hinged through the middle of
+  // the wing's thickness. (The cut edges are left open.)
+  const SURF={flap:{from:1.05,to:4.62},aileron:{from:4.72,to:7.7}},HINGE=0.76,cuts={};const nrm=geo.attributes.normal,uvA=geo.attributes.uv;
+  const cornerOf=v=>({p:[pos.getX(v),pos.getY(v),pos.getZ(v)],n:nrm?[nrm.getX(v),nrm.getY(v),nrm.getZ(v)]:[0,0,1],t:uvA?[uvA.getX(v),uvA.getY(v)]:[0,0]});
+  const lerpC=(a,b,k)=>({p:a.p.map((x,i)=>x+(b.p[i]-x)*k),n:a.n.map((x,i)=>x+(b.n[i]-x)*k),t:a.t.map((x,i)=>x+(b.t[i]-x)*k)});
+  const clipP=(poly,f)=>{const o=[];for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],fa=f(a.p),fb=f(b.p);if(fa>=0)o.push(a);if((fa>=0)!==(fb>=0))o.push(lerpC(a,b,fa/(fa-fb)));}return o;};
+  const mkB=()=>({P:[],N:[],T:[]}),addPoly=(B,poly)=>{for(let i=1;i+1<poly.length;i++)[poly[0],poly[i],poly[i+1]].forEach(c=>{B.P.push(...c.p);B.N.push(...c.n);B.T.push(...c.t);});};
+  comp.forEach(c=>{const cx=(c.mn[0]+c.mx[0])/2,cy=(c.mn[1]+c.mx[1])/2,cz=(c.mn[2]+c.mx[2])/2;
+    const side=Math.abs(cx+0.78)<0.3&&Math.abs(cy-4.53)<0.3&&Math.abs(cz-1.675)<0.3?1:Math.abs(cx+0.385)<0.3&&Math.abs(cy+4.625)<0.3&&Math.abs(cz-1.525)<0.3?-1:0;
+    if(!side||c.tris.some(t=>used.has(t)))return;
+    // the wing's planform: its leading and trailing edges along the span, straight between its root and the last full station before the tip
+    const st=new Map();c.tris.forEach(t=>{for(let j=0;j<3;j++){const v=idx[t*3+j],y=pos.getY(v)*side,x=pos.getX(v),key=Math.round(y*4)/4,e=st.get(key)||{y:key,le:-1e9,te:1e9,n:0};e.le=Math.max(e.le,x);e.te=Math.min(e.te,x);e.n++;st.set(key,e);}});
+    const rows=[...st.values()].filter(e=>e.n>=20).sort((a,b)=>a.y-b.y);if(rows.length<2)return;
+    const root=rows.find(e=>e.y>=0.95&&e.y<=1.3)||rows[0],tip=[...rows].reverse().find(e=>e.y<=8.05&&e.le-e.te>0.9)||rows[rows.length-1];
+    const line=(a,b)=>y=>a+(b-a)*(y-root.y)/(tip.y-root.y),le=line(root.le,tip.le),te=line(root.te,tip.te),hx=y=>le(y)-HINGE*(le(y)-te(y));
+    // where a vertical line meets the wing's skin, for the middle of its thickness at the hinge
+    const zMid=(x,y)=>{const zs=[];c.tris.forEach(t=>{const Q=[0,1,2].map(j=>{const v=idx[t*3+j];return[pos.getX(v),pos.getY(v),pos.getZ(v)];}),d=(Q[1][0]-Q[0][0])*(Q[2][1]-Q[0][1])-(Q[2][0]-Q[0][0])*(Q[1][1]-Q[0][1]);if(Math.abs(d)<1e-12)return;
+      const a=((Q[1][0]-x)*(Q[2][1]-y)-(Q[2][0]-x)*(Q[1][1]-y))/d,b=((Q[2][0]-x)*(Q[0][1]-y)-(Q[0][0]-x)*(Q[2][1]-y))/d,cc=1-a-b;if(a>=-1e-6&&b>=-1e-6&&cc>=-1e-6)zs.push(a*Q[0][2]+b*Q[1][2]+cc*Q[2][2]);});
+      return zs.length>=2?(Math.min(...zs)+Math.max(...zs))/2:zs.length?zs[0]:1.5;};
+    const sk=Object.entries(SURF).map(([kind,S])=>{const k0=hx(S.from),k1=hx(S.to),sl=(k1-k0)/(S.to-S.from);
+      return{key:(kind==='flap'?'f':'a')+(side>0?'L':'R'),fs:[q=>q[1]*side-S.from,q=>S.to-q[1]*side,q=>k0+sl*(q[1]*side-S.from)-q[0]],B:mkB(),
+        ends:[S.from+0.02,S.to-0.02].map(yy=>{const x=hx(yy),y=yy*side;return[x,y,zMid(x,y)];})};});
+    const rest=mkB();
+    c.tris.forEach(t=>{used.add(t);let left=[[0,1,2].map(j=>cornerOf(idx[t*3+j]))];
+      sk.forEach(S=>{const next=[];left.forEach(poly=>{let ins=poly;S.fs.forEach(f=>{if(ins.length>=3)ins=clipP(ins,f);});if(ins.length>=3)addPoly(S.B,ins);
+        let r=poly;S.fs.forEach(f=>{if(r.length<3)return;const out=clipP(r,q=>-f(q));if(out.length>=3)next.push(out);r=clipP(r,f);});});left=next;});
+      left.forEach(poly=>addPoly(rest,poly));});
+    cuts[side]={sk,rest};});
+
   const keep=[];for(let t=0;t<tc;t++)if(!used.has(t))keep.push(idx[t*3],idx[t*3+1],idx[t*3+2]);
   geo.setIndex(keep);
   const parts={},par0=mesh.parent;
@@ -1858,6 +1888,12 @@ function mdlSplit(mesh){
     else if(k==='rud'){hx=c.mx[0]-0.02;hy=0;hz=(c.mn[2]+c.mx[2])/2;}
     else{hx=c.mx[0]-0.01;hy=0;hz=(c.mn[2]+c.mx[2])/2;}
     pv.position.set(hx,hy,hz);pv.userData.p0=pv.position.clone();m.position.set(-hx,-hy,-hz);pv.add(m);par0.add(pv);parts[k]=pv;}
+  const geoOf=(B,off)=>{const g=new THREE.BufferGeometry(),P=Float32Array.from(B.P);if(off)for(let i=0;i<P.length;i+=3){P[i]-=off[0];P[i+1]-=off[1];P[i+2]-=off[2];}
+    g.setAttribute('position',new THREE.BufferAttribute(P,3));g.setAttribute('normal',new THREE.Float32BufferAttribute(B.N,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(B.T,2));g.computeBoundingSphere();return g;};
+  Object.values(cuts).forEach(C=>{const r=new THREE.Mesh(geoOf(C.rest),mesh.material);r.castShadow=r.receiveShadow=true;par0.add(r);
+    C.sk.forEach(S=>{if(!S.B.P.length)return;const a=S.ends[0],b=S.ends[1],ax=new THREE.Vector3(b[0]-a[0],b[1]-a[1],b[2]-a[2]).normalize();
+      const pv=new THREE.Group(),m=new THREE.Mesh(geoOf(S.B,a),mesh.material);m.castShadow=m.receiveShadow=true;pv.position.set(a[0],a[1],a[2]);pv.add(m);par0.add(pv);
+      pv.userData.ax=ax;pv.userData.down=-Math.sign(ax.y)||1;parts[S.key]=pv;});});
   return parts;}
 function mdlPrep(root){
   root.traverse(o=>{if(!o.isMesh)return;o.castShadow=true;o.receiveShadow=true;const m=o.material;
@@ -1905,6 +1941,7 @@ frameHooks.push((s,dt,simDt,ckp)=>{
   const onG=s.y<0.6;MDL.wheelA+=(onG?s.V:0)*simDt;const dm=(PU.mainW[0].position.y-PU.mainW[0].userData.y0)/K,dn=(PU.noseW[0].position.y-PU.noseW[0].userData.y0)/K;
   ['wL','wR','wN'].forEach(k=>{const w=P[k];if(!w)return;w.rotation.y=MDL.wheelA/(w.userData.r*K);w.position.z=w.userData.p0.z+(k==='wN'?dn:dm);});
   if(P.rud)P.rud.rotation.z=PU.rud.rotation.x;
+  [['fL',PU.flaps[0].rotation.x],['fR',PU.flaps[1].rotation.x],['aL',PU.ailL.rotation.x],['aR',PU.ailR.rotation.x]].forEach(([k,dn])=>{const q=P[k];if(q)q.quaternion.setFromAxisAngle(q.userData.ax,dn*q.userData.down);});
   const el=-PU.elev[0].rotation.x;if(P.eL)P.eL.rotation.y=el;if(P.eR)P.eR.rotation.y=el;});
 window.__mdl={MDL,plane,paintLivery};
 // ---- The airline gate at the FBO (models/, credited in CREDITS.md): a Coral Air 737 MAX 8 parked nose-in, a jet bridge on a fixed walkway from the FBO to its
@@ -1943,6 +1980,7 @@ const RAMP={ready:false,failed:false,info:{},g:null,mixer:null,act:null,inView:f
       G.legs.push({pv,axisZ,side:Math.sign(x)});return pv;};
     leg(2.86,RAMP.gearZ.main,2.25,0.56,0.38,0.88,false);leg(-2.86,RAMP.gearZ.main,2.25,0.56,0.38,0.88,false);leg(0,RAMP.gearZ.nose,1.55,0.345,0.22,0.42,true);
     G.set=f=>{G.fold=f;G.legs.forEach(L=>{if(L.axisZ)L.pv.rotation.x=-f*PI*0.5;else L.pv.rotation.z=L.side*f*PI*0.5;L.pv.visible=f<0.97;});};
+    G.steer=a=>{G.legs.forEach(L=>{if(L.axisZ)L.pv.rotation.y=a*(1-G.fold);});};   // the nose wheel turns about its leg (radians, + to the left)
     return G;};
   // stand-in boxes for the projected shadows of the tiers without shadow maps: [w, h, d, x, y, z] in the group's own metres
   const shadowsOf=(par,boxes)=>boxes.forEach(q=>{const o=new THREE.Object3D();o.geometry=new THREE.BoxGeometry(q[0],q[1],q[2]);o.position.set(q[3],q[4],q[5]);par.add(o);addPShadow(o);});
@@ -2028,9 +2066,9 @@ const TR={st:'park',t:0,P:{free:true},M:null,M2:null,tug:null,tugM:null,flt:null
     return{x:A.x+(B.x-A.x)*t,a:A.a+(B.a-A.a)*t,y:A.y+(B.y-A.y)*t,v:A.v,p:A.p==null?null:A.p+((B.p==null?A.p:B.p)-A.p)*t,g:A.g};};
   const run=(M,dt)=>{if(!M||M.done)return;let vt=at(M,M.d).v;const look=Math.min(1200,M.v*M.v/(2*M.dec)+12);
     for(let dd=3;dd<look;dd+=3){const q=at(M,M.d+dd);const al=Math.sqrt(q.v*q.v+2*M.dec*dd);if(al<vt)vt=al;}
-    if(M.end)vt=Math.min(vt,Math.sqrt(2*M.dec*Math.max(0,M.len-M.d-0.15)));
-    M.v=M.v<vt?Math.min(vt,M.v+M.acc*dt):Math.max(vt,M.v-M.dec*dt);M.d+=M.v*dt;
-    if(M.d>=M.len-0.1&&(M.v<0.25||!M.end)){M.d=M.len;M.v=M.end?0:M.v;M.done=true;}};
+    if(M.end)vt=Math.min(vt,Math.sqrt(2*M.dec*Math.max(0,M.len-M.d))+0.05);   // (it creeps the last few centimetres)
+    M.v=M.v<vt?Math.min(vt,M.v+M.acc*dt):Math.max(vt,M.v-M.dec*dt);M.d=Math.min(M.len,M.d+M.v*dt);
+    if(M.end?M.len-M.d<0.06:M.d>=M.len-0.1){M.d=M.len;M.v=M.end?0:M.v;M.done=true;}};
   const poseOf=M=>{const p=at(M,M.d),p0=at(M,M.d-1.6),p1=at(M,M.d+1.6);let dx=p1.x-p0.x,da=p1.a-p0.a;if(M.rev){dx=-dx;da=-da;}
     return{x:p.x,a:p.a,y:p.y,yaw:Math.atan2(dx,-da),p:p.p,g:p.g,v:M.v};};
   const place=(obj,q)=>{obj.position.set(q.x,q.y||0,zOf(q.a));obj.rotation.y=q.yaw;};
@@ -2089,13 +2127,13 @@ const TR={st:'park',t:0,P:{free:true},M:null,M2:null,tug:null,tugM:null,flt:null
   const lightsOn=jo=>{const P=[],Cc=[],Sz=[],K=[],BASE=[],add=(x,y,z,col,sz,kind)=>{P.push(x,y-RAMP.raise,z);Cc.push(0,0,0);Sz.push(sz);K.push(kind);BASE.push(col);};
     add(17.6,3.1,-5.6,[1.2,0.05,0.03],0.45,'nav');add(-17.6,3.1,-5.6,[0.04,1.1,0.2],0.45,'nav');add(0,5.9,-19.6,[0.8,0.8,0.76],0.35,'nav');
     add(0,5.2,-2,[1.4,0.08,0.04],0.9,'bcn');add(0,0.85,-2,[1.4,0.08,0.04],0.9,'bcn');add(17.7,3.1,-5.7,[1.6,1.6,1.7],1.5,'stb');add(-17.7,3.1,-5.7,[1.6,1.6,1.7],1.5,'stb');
-    add(1.6,1.6,4.5,[1.8,1.7,1.5],2.8,'ldg');add(-1.6,1.6,4.5,[1.8,1.7,1.5],2.8,'ldg');
+    add(1.6,1.6,4.5,[1.8,1.7,1.5],2.8,'ldg');add(-1.6,1.6,4.5,[1.8,1.7,1.5],2.8,'ldg');add(0,1.25,16.95,[1.6,1.55,1.35],2.0,'taxi');
     const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(P,3));g.setAttribute('color',new THREE.Float32BufferAttribute(Cc,3));g.setAttribute('size',new THREE.Float32BufferAttribute(Sz,1));
     const m=lightMat();m.uniforms=PU.glow.material.uniforms;   // (the same intensity, pixel ratio and night level as the trainer's own airplane's lamps)
     const pts=new THREE.Points(g,m);pts.frustumCulled=false;pts.renderOrder=20;jo.add(pts);TR.lights={g,K,BASE};};
   let clock=0;
   const lights=(eng,run,ldg)=>{const L=TR.lights;if(!L)return;clock+=0.016;const c=L.g.attributes.color;
-    L.K.forEach((k,i)=>{const on=k==='nav'?(eng||TR.st!=='park'):k==='bcn'?(eng&&(clock%1.1)<0.12):k==='stb'?(run&&(clock%1.25)<0.05):ldg,b=L.BASE[i];c.setXYZ(i,on?b[0]:0,on?b[1]:0,on?b[2]:0);});c.needsUpdate=true;};
+    L.K.forEach((k,i)=>{const on=k==='nav'?(eng||TR.st!=='park'):k==='bcn'?(eng&&(clock%1.1)<0.12):k==='stb'?(run&&(clock%1.25)<0.05):k==='taxi'?(eng&&TR.taxiing):ldg,b=L.BASE[i];c.setXYZ(i,on?b[0]:0,on?b[1]:0,on?b[2]:0);});c.needsUpdate=true;};
 
   TR.reset=mode=>{TR.mode=mode;TR.st='park';TR.t=0;TR.parkFor=mode==='final'?1e9:70+Math.random()*70;TR.M=TR.M2=TR.tugM=null;TR.lines.length=0;TR.lvl=0;TR.goAround=false;TR.said={};
     if(!RAMP.ready)return;const jg=RAMP.jetG;jg.visible=true;place(jg,{x:GATE.x,a:GATE.a,y:0,yaw:PI/2});TR.pitch=TR.bank=0;RAMP.jetB.rotation.set(0,0,0);TR.gear=0;RAMP.gear.set(0);
@@ -2136,7 +2174,8 @@ const TR={st:'park',t:0,P:{free:true},M:null,M2:null,tug:null,tugM:null,flt:null
         break;}
       case'push':{run(TR.M,dt);const q=poseOf(TR.M);place(jg,q);eng=TR.t>20;
         // the tug rides at the nose gear, its bar on the gear: 16.6 m ahead of the jet's middle, the bar 3.5 m, the tug 2.4 m more, facing the jet
-        const f=q.yaw,nx=q.x+Math.sin(f)*(RAMP.gearZ.nose+5.9),na=q.a-Math.cos(f)*(RAMP.gearZ.nose+5.9);place(TR.tug,{x:nx,a:na,yaw:f+PI});
+        const f=q.yaw,gx=q.x+Math.sin(f)*RAMP.gearZ.nose,ga=q.a-Math.cos(f)*RAMP.gearZ.nose,w=f+(TR.steer||0);
+        place(TR.tug,{x:gx+Math.sin(w)*5.9,a:ga-Math.cos(w)*5.9,yaw:w+PI});
         if(TR.M.done){const [a,b]=tugOut();TR.tugM=[mover(a,{rev:true,acc:0.4,dec:0.6}),mover(b,{acc:0.5,dec:0.7})];go('tugback');}break;}
       case'tugback':{eng=true;const m=TR.tugM[0].done?TR.tugM[1]:TR.tugM[0];run(m,dt);place(TR.tug,poseOf(m));
         if(TR.tugM[1].done&&TR.t>6){TR.M=mover(outApron(),{acc:0.35,dec:0.6});say('Ground','PILOT',cs()+', ready to taxi.');go('taxiApron');}break;}
@@ -2179,6 +2218,10 @@ const TR={st:'park',t:0,P:{free:true},M:null,M2:null,tug:null,tugM:null,flt:null
       TR.pitch+=(pt-TR.pitch)*Math.min(1,dt*1.6);TR.bank+=(bk-TR.bank)*Math.min(1,dt*1.2);}
     else{TR.pitch+=(0-TR.pitch)*Math.min(1,dt*2);TR.bank*=Math.max(0,1-dt*2);}
     J.rotation.set(-TR.pitch*D2R,0,-TR.bank*D2R);
+    {const x=jg.position.x,z=jg.position.z,y=jg.rotation.y,pr=TR.prevPose;let st=0;
+      if(pr&&jg.position.y<0.3){const ds=(x-pr.x)*Math.sin(y)+(z-pr.z)*Math.cos(y),dy=yawDiff(y,pr.y);if(Math.abs(ds)>0.004)st=Math.max(-1.1,Math.min(1.1,Math.atan(16.55*dy/ds)));else st=TR.steer||0;}
+      TR.steer=(TR.steer||0)+(st-(TR.steer||0))*Math.min(1,dt*3);RAMP.gear.steer(jg.position.y<0.3?TR.steer:0);
+      TR.taxiing=jg.position.y<0.3&&!!pr&&Math.hypot(x-pr.x,z-pr.z)>0.002;TR.prevPose={x,z,y};}
     TR.lvl=!jg.visible?0:TR.st==='depart'&&jg.position.y<400?1:TR.st==='goaround'?0.95:TR.st==='arrive'&&TR.M&&poseOf(TR.M).y<=0.05&&TR.M.v>25?0.85:eng?(TR.st==='arrive'?0.45:0.3):0;
     lights(eng,rwy,ldg);};
   // where the airliner is (for SimBot.state().traffic) and how loud it is where the camera is
@@ -2845,7 +2888,7 @@ const Sfx=(function(){let ctx=null,n=null,tdSeen=0,ntSeen=0,duck=1;
     if(!jet){const nz=ctx.createBufferSource();nz.buffer=Radio.noise();nz.loop=true;nz.start();const bp=ctx.createBiquadFilter();bp.type='bandpass';bp.frequency.value=420;bp.Q.value=0.6;
       const lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=5000;const ng=ctx.createGain();ng.gain.value=0;const wh=ctx.createOscillator();wh.type='sine';wh.frequency.value=2900;wh.start();
       const wg=ctx.createGain();wg.gain.value=0;nz.connect(bp);bp.connect(ng);ng.connect(lp);wh.connect(wg);wg.connect(lp);lp.connect(ctx.destination);jet={bp,lp,ng,wg,wh};}
-    const k=muted||!opt.sfx?0:level*near;set(jet.ng.gain,0.11*k,0.4);set(jet.wg.gain,0.006*k*(0.4+0.6*near),0.4);set(jet.wh.frequency,2400+900*level,0.8);set(jet.bp.frequency,300+380*level,0.6);set(jet.lp.frequency,cockpit?1100:5200,0.2);}catch(e){}}
+    const k=muted||!opt.sfx?0:level*near;set(jet.ng.gain,0.55*k,0.4);set(jet.wg.gain,0.03*k*(0.4+0.6*near),0.4);set(jet.wh.frequency,2400+900*level,0.8);set(jet.bp.frequency,300+380*level,0.6);set(jet.lp.frequency,cockpit?1100:5200,0.2);}catch(e){}}
   function update(s,o){
     if(!opt.sfx){if(n)set(n.master.gain,0,0.05);return;}
     if(!n){if(o.muted)return;build();if(!n)return;}
